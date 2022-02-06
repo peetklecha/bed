@@ -28,18 +28,18 @@ export class Context {
     DELETE,
   };
 
-  #handlersIterator: IterableIterator<Handler>;
+  #handlersIterator: IterableIterator<Handler<this>>;
   #bodyPromise: Promise<ReturnType<JSON["parse"]>>;
-  #endpoint: AnnotatedConfig;
+  #endpoint: AnnotatedConfig<this>;
 
   query: Record<string, unknown>;
   params: Record<string, string>;
   err: Error | null = null;
   extras: Record<string, unknown> = {};
 
-  constructor(public requestEvent: Deno.RequestEvent, public server: Server) {
+  constructor(public requestEvent: Deno.RequestEvent, server: Server<Context>) {
     const { path, queryString } = this.processedUrl;
-    const { endpoint, params, handlers } = this.server.traverseEndpoint(
+    const { endpoint, params, handlers } = server.traverseEndpoint(
       ...path,
       this.#methodSymbol,
     );
@@ -126,7 +126,7 @@ export class Context {
     try {
       // use nearest user-defined error handler, if one exists
       this.err = err;
-      let endpoint: AnnotatedConfig | null = this.#endpoint;
+      let endpoint: AnnotatedConfig<this> | null = this.#endpoint;
       while (endpoint && !(ERROR in endpoint)) endpoint = endpoint[PARENT];
       if (endpoint && ERROR in endpoint) {
         return endpoint[ERROR]!(this as ErrorContext);

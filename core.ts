@@ -24,17 +24,17 @@ import {
 import { Context } from "./lib/context.ts";
 import { loadMiddleware, PublicError, push } from "./lib/util.ts";
 
-class Server {
-  config: AnnotatedConfig;
+class Server<UserDefinedContext extends Context> {
+  config: AnnotatedConfig<UserDefinedContext>;
   server: Deno.Listener | null = null;
-  prehandlers: Prehandler[];
+  prehandlers: Prehandler<UserDefinedContext>[];
   jsonBody: boolean;
   [key: string]: unknown
 
   constructor(
-    apiConfig: Config,
+    apiConfig: Config<UserDefinedContext>,
     { prehandlers = [], jsonBody = true }: {
-      prehandlers?: Prehandler[];
+      prehandlers?: Prehandler<UserDefinedContext>[];
       jsonBody?: boolean;
     } = {},
   ) {
@@ -54,14 +54,14 @@ class Server {
     const httpConn = Deno.serveHttp(conn);
     for await (const event of httpConn) {
       if (await this.#preprocess(event)) continue;
-      await new Context(event, this).next();
+      await new Context(event, this as unknown as Server<Context>).next();
     }
   }
 
   traverseEndpoint(...path: (string | MethodSymbol)[]) {
     let endpoint = this.config;
     const params: Record<string, string> = {};
-    const handlers: Handler[] = [];
+    const handlers: Handler<UserDefinedContext>[] = [];
     let endpointSet = false;
     for (const node of path) {
       if (node in endpoint) {
@@ -79,19 +79,19 @@ class Server {
     return { endpoint, params, handlers };
   }
 
-  static #annotateConfig(
-    config: Config,
-    parent: AnnotatedConfig | null = null,
+  static #annotateConfig<UserDefinedContext extends Context>(
+    config: Config<UserDefinedContext>,
+    parent: AnnotatedConfig<UserDefinedContext> | null = null,
   ) {
-    const output: AnnotatedConfig = { [PARENT]: parent };
+    const output: AnnotatedConfig<UserDefinedContext> = { [PARENT]: parent };
     for (const key of Object.getOwnPropertyNames(config)) {
       output[key] = this.#annotateConfig(config[key], output);
     }
-    // typescript made me do it this way
     if (FALLBACK in config) output[FALLBACK] = config[FALLBACK];
     else if (parent === null) {
       output[FALLBACK] = async ({ res }) => await res(404);
     }
+		// typescript made me do it this way
     if (ERROR in config) output[ERROR] = config[ERROR];
     if (GET in config) output[GET] = config[GET];
     if (PUT in config) output[PUT] = config[PUT];

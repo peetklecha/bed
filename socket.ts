@@ -1,4 +1,5 @@
 import type { Server } from "./core.ts";
+import type { Context } from "./lib/context.ts";
 
 export const ONERROR = Symbol("onerror");
 export const ONCLOSE = Symbol("onclose");
@@ -110,26 +111,28 @@ export class BedSocket {
     room.sockets.delete(this);
   }
 
-  static prehandler(wsConfig: WSConfig) {
-    noClient();
-    return async (server: Server, event: Deno.RequestEvent) => {
-      const socketServer = { wsConfig, sockets: [], rooms: Room.rooms };
-      const server_: Server & SocketServer = Object.assign(
-        server,
-        socketServer,
-      );
-      const { request: { headers } } = event;
-      const isWSReq = headers.get("upgrade")?.toLowerCase?.() === "websocket";
-      if (isWSReq) {
-        const { socket, response } = Deno.upgradeWebSocket(event.request);
-        server_.sockets.push(
-          new BedSocket(socket, server_.wsConfig, socketServer),
-        );
-        await event.respondWith(response);
-      }
-      return isWSReq;
-    };
-  }
+  // static prehandler(wsConfig: WSConfig) {
+  //   noClient();
+  //   return async (event: Deno.RequestEvent) => {
+  //     const socketServer = { wsConfig, sockets: [], rooms: Room.rooms };
+  //     // const server_: Server<UserDefinedContext> & SocketServer = Object.assign(
+  //     //   server,
+  //     //   socketServer,
+  //     // );
+  //     const { request: { headers } } = event;
+  //     const isWSReq = headers.get("upgrade")?.toLowerCase?.() === "websocket";
+  //     if (isWSReq) {
+  //       const { socket, response } = Deno.upgradeWebSocket(event.request);
+  //       server_.sockets.push(
+  //         new BedSocket(socket, server_.wsConfig, socketServer),
+  //       );
+  //       await event.respondWith(response);
+  //     }
+  //     return isWSReq;
+  //   };
+  // }
+	static ServerWithSocket = class ServerWithSockets {
+	}
 }
 
 export class Room {
@@ -163,4 +166,8 @@ function noClient() {
   }
 }
 
-export default BedSocket.prehandler;
+export interface WSContext {
+	ws: SocketServer
+}
+
+// export default BedSocket.prehandler;
