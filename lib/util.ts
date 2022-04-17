@@ -1,17 +1,18 @@
 import { AnnotatedConfig, Handler, hasFallback } from "./types.ts";
 import { FALLBACK, PARENT, USE } from "./symbols.ts";
+import type { Context } from './context.ts';
 
 export function push<T>(arr: T[], content: T | T[]) {
   if (Array.isArray(content)) arr.push(...content);
   else arr.push(content);
 }
 
-export function loadMiddleware(
-  endpoint: AnnotatedConfig,
+export function loadMiddleware<UserDefinedContext extends Context>(
+  endpoint: AnnotatedConfig<UserDefinedContext>,
   endpointSet: boolean,
-  handlers: Handler[],
+  handlers: Handler<UserDefinedContext>[],
 ) {
-  let parentEndpoint: AnnotatedConfig | null = endpoint;
+  let parentEndpoint: AnnotatedConfig<UserDefinedContext> | null = endpoint;
   while (parentEndpoint) {
     if (!endpointSet && hasFallback(parentEndpoint)) {
       push(handlers, parentEndpoint[FALLBACK]);

@@ -16,7 +16,7 @@ const logging: Handler<Context> = async (ctx) => {
   const { fullPathString } = processedUrl;
   const status = formattedStatus(ctx.extras.responseStatus);
   const time = `${+end - +start}ms`;
-  console.log(`${method} ${fullPathString} ${status} ${time}`);
+  console.log(`${method} ${fullPathString} ${status || ''} ${time}`);
 };
 
 const formattedStatus = (status: unknown) => {

@@ -20,6 +20,7 @@ import {
   isParamConfig,
   Prehandler,
   Sendable,
+	AnnotatedParamConfig
 } from "./lib/types.ts";
 import { Context } from "./lib/context.ts";
 import { loadMiddleware, PublicError, push } from "./lib/util.ts";
@@ -27,14 +28,14 @@ import { loadMiddleware, PublicError, push } from "./lib/util.ts";
 class Server<UserDefinedContext extends Context> {
   config: AnnotatedConfig<UserDefinedContext>;
   server: Deno.Listener | null = null;
-  prehandlers: Prehandler<UserDefinedContext>[];
+  prehandlers: Prehandler[];
   jsonBody: boolean;
   [key: string]: unknown
 
   constructor(
     apiConfig: Config<UserDefinedContext>,
     { prehandlers = [], jsonBody = true }: {
-      prehandlers?: Prehandler<UserDefinedContext>[];
+      prehandlers?: Prehandler[];
       jsonBody?: boolean;
     } = {},
   ) {
@@ -45,6 +46,7 @@ class Server<UserDefinedContext extends Context> {
 
   async listen(port: number) {
     this.server = Deno.listen({ port });
+		console.log(`Listening ${port}`);
     for await (const conn of this.server) {
       this.#handle(conn).catch(console.error);
     }
@@ -54,7 +56,7 @@ class Server<UserDefinedContext extends Context> {
     const httpConn = Deno.serveHttp(conn);
     for await (const event of httpConn) {
       if (await this.#preprocess(event)) continue;
-      await new Context(event, this as unknown as Server<Context>).next();
+      await new Context(event).init(this).next();
     }
   }
 
@@ -99,10 +101,10 @@ class Server<UserDefinedContext extends Context> {
     if (DELETE in config) output[DELETE] = config[DELETE];
     if (USE in config) output[USE] = config[USE];
     if (PARAM in config) {
-      output[PARAM] = config[PARAM];
-      if (!isParamConfig(config)) {
+			if (!isParamConfig(config[PARAM]!)) {
         throw new Error("Parametric routes must have an alias");
       }
+      output[PARAM] = this.#annotateConfig(config[PARAM]!, output) as AnnotatedParamConfig<UserDefinedContext>;
     }
     if (isParamConfig(config)) output[ALIAS] = config[ALIAS];
     return output;
@@ -110,7 +112,7 @@ class Server<UserDefinedContext extends Context> {
 
   async #preprocess(event: Deno.RequestEvent) {
     for (const prehandler of this.prehandlers) {
-      const done = await prehandler(this, event);
+      const done = await prehandler(event);
       if (done) return true;
     }
     return false;

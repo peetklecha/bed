@@ -13,7 +13,6 @@ import {
   USE,
 } from "./symbols.ts";
 import type { Context, ErrorContext } from "./context.ts";
-import type { Server } from "../core.ts";
 
 export interface Config<UserDefinedContext extends Context> {
   [key: string]: Config<UserDefinedContext>;
@@ -33,11 +32,19 @@ export interface AnnotatedConfig<UserDefinedContext extends Context> extends Con
   [ALIAS]?: string;
 }
 
-export interface AnnotatedConfigWithParam<UserDefinedContext extends Context> extends AnnotatedConfig<UserDefinedContext> {
+export interface ConfigWithParam<UserDefinedContext extends Context> extends Config<UserDefinedContext> {
   [PARAM]: ParamConfig<UserDefinedContext>;
 }
 
-export interface ParamConfig<UserDefinedContext extends Context> extends AnnotatedConfig<UserDefinedContext> {
+export interface AnnotatedConfigWithParam<UserDefinedContext extends Context> extends AnnotatedConfig<UserDefinedContext> {
+  [PARAM]: AnnotatedParamConfig<UserDefinedContext>;
+}
+
+export interface AnnotatedParamConfig<UserDefinedContext extends Context> extends AnnotatedConfig<UserDefinedContext> {
+  [ALIAS]: string;
+}
+
+export interface ParamConfig<UserDefinedContext extends Context> extends Config<UserDefinedContext> {
   [ALIAS]: string;
 }
 
@@ -50,7 +57,6 @@ type ErrorHandler = (errCtx: ErrorContext) => void | Promise<void>;
 export type HandlerSpec<UserDefinedContext extends Context> = Handler<UserDefinedContext> | Handler<UserDefinedContext>[];
 
 export type Prehandler = ((
-  // server: Server<UserDefinedContext>,
   event: Deno.RequestEvent,
 ) => Promise<boolean>);
 
