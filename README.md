@@ -84,7 +84,28 @@ export default async function getUsers({ query, res } : Context) {
 }
 ```
 
-For parametric routes, middleware, fallback handlers, error handling, body parsing, and customization see the following subsections.
+For extended context types, parametric routes, middleware, fallback handlers, error handling, body parsing, and customization see the following subsections.
+
+### Extend Context Types
+
+Middleware my attach additional properties to the context object. Declare the extended type of the context object when you instantiate the server like so:
+
+```ts
+import { Server, Context, USE } from 'bed/core.ts';
+
+interface MyContext extends Context {
+	myValue: string
+}
+
+function attachMyValue(ctx: MyContext) {
+	ctx.myValue = "hello!";
+	ctx.next();
+}
+
+await new Server<MyContext>({
+	[USE]: [logging, attachMyValue]
+}).listen(8080);
+```
 
 ### Parametric Routes
 
