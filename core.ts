@@ -20,19 +20,20 @@ import {
   isParamConfig,
   Prehandler,
   Sendable,
+	AnnotatedParamConfig
 } from "./lib/types.ts";
 import { Context } from "./lib/context.ts";
 import { loadMiddleware, PublicError, push } from "./lib/util.ts";
 
-class Server {
-  config: AnnotatedConfig;
+class Server<UserDefinedContext extends Context> {
+  config: AnnotatedConfig<UserDefinedContext>;
   server: Deno.Listener | null = null;
   prehandlers: Prehandler[];
   jsonBody: boolean;
   [key: string]: unknown
 
   constructor(
-    apiConfig: Config,
+    apiConfig: Config<UserDefinedContext>,
     { prehandlers = [], jsonBody = true }: {
       prehandlers?: Prehandler[];
       jsonBody?: boolean;
@@ -45,6 +46,7 @@ class Server {
 
   async listen(port: number) {
     this.server = Deno.listen({ port });
+		console.log(`Listening ${port}`);
     for await (const conn of this.server) {
       this.#handle(conn).catch(console.error);
     }
@@ -54,14 +56,14 @@ class Server {
     const httpConn = Deno.serveHttp(conn);
     for await (const event of httpConn) {
       if (await this.#preprocess(event)) continue;
-      await new Context(event, this).next();
+      await new Context(event).init(this).next();
     }
   }
 
   traverseEndpoint(...path: (string | MethodSymbol)[]) {
     let endpoint = this.config;
     const params: Record<string, string> = {};
-    const handlers: Handler[] = [];
+    const handlers: Handler<UserDefinedContext>[] = [];
     let endpointSet = false;
     for (const node of path) {
       if (node in endpoint) {
@@ -79,19 +81,19 @@ class Server {
     return { endpoint, params, handlers };
   }
 
-  static #annotateConfig(
-    config: Config,
-    parent: AnnotatedConfig | null = null,
+  static #annotateConfig<UserDefinedContext extends Context>(
+    config: Config<UserDefinedContext>,
+    parent: AnnotatedConfig<UserDefinedContext> | null = null,
   ) {
-    const output: AnnotatedConfig = { [PARENT]: parent };
+    const output: AnnotatedConfig<UserDefinedContext> = { [PARENT]: parent };
     for (const key of Object.getOwnPropertyNames(config)) {
       output[key] = this.#annotateConfig(config[key], output);
     }
-    // typescript made me do it this way
     if (FALLBACK in config) output[FALLBACK] = config[FALLBACK];
     else if (parent === null) {
       output[FALLBACK] = async ({ res }) => await res(404);
     }
+		// typescript made me do it this way
     if (ERROR in config) output[ERROR] = config[ERROR];
     if (GET in config) output[GET] = config[GET];
     if (PUT in config) output[PUT] = config[PUT];
@@ -99,10 +101,10 @@ class Server {
     if (DELETE in config) output[DELETE] = config[DELETE];
     if (USE in config) output[USE] = config[USE];
     if (PARAM in config) {
-      output[PARAM] = config[PARAM];
-      if (!isParamConfig(config)) {
+			if (!isParamConfig(config[PARAM]!)) {
         throw new Error("Parametric routes must have an alias");
       }
+      output[PARAM] = this.#annotateConfig(config[PARAM]!, output) as AnnotatedParamConfig<UserDefinedContext>;
     }
     if (isParamConfig(config)) output[ALIAS] = config[ALIAS];
     return output;
@@ -110,7 +112,7 @@ class Server {
 
   async #preprocess(event: Deno.RequestEvent) {
     for (const prehandler of this.prehandlers) {
-      const done = await prehandler(this, event);
+      const done = await prehandler(event);
       if (done) return true;
     }
     return false;

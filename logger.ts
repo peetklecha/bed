@@ -5,8 +5,9 @@ import {
   yellow,
 } from "https://deno.land/std@0.115.1/fmt/colors.ts";
 import type { Handler } from "./lib/types.ts";
+import type { Context } from "./lib/context.ts";
 
-const logging: Handler = async (ctx) => {
+const logging: Handler<Context> = async (ctx) => {
   const { next, processedUrl, requestEvent } = ctx;
   const start = performance.now();
   await next();
@@ -15,7 +16,7 @@ const logging: Handler = async (ctx) => {
   const { fullPathString } = processedUrl;
   const status = formattedStatus(ctx.extras.responseStatus);
   const time = `${+end - +start}ms`;
-  console.log(`${method} ${fullPathString} ${status} ${time}`);
+  console.log(`${method} ${fullPathString} ${status || ''} ${time}`);
 };
 
 const formattedStatus = (status: unknown) => {

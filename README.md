@@ -14,7 +14,7 @@ const server = new Server(handlers);
 await server.listen(8080);
 ```
 
-`handlers` should be an tree describing the routes, middleware, and endpoints of your server. Unlike more sophisticated server libraries like Express, Koa, or Oak, you cannot dynamically load middleware or endware after initializing a server -- the argument to `new Server` should fully specify the API.
+`handlers` should be a tree describing the routes, middleware, and endpoints of your server. Unlike more sophisticated server libraries like Express, Koa, or Oak, you cannot dynamically load middleware or endware after initializing a server -- the argument to `new Server` should fully specify the API.
 
 Suppose we want to define four endpoints for our server: `GET /`, `GET /users`, `POST /users`, and `GET /users/admins`. We would then define our handlers like so:
 
@@ -47,7 +47,7 @@ interface Context {
 	query: Record<string, unknown>
 	params: Record<string, string>
 	err: Error | null
-	extras: Record<string, unknown> // middleware should attach arbitrary data here
+	extras: Record<string, unknown> // middleware can attach arbitrary data here
 	requestEvent: Deno.RequestEvent // the underlying request event
 	server: Server // reference to the server
 	get processedUrl(): {
@@ -359,7 +359,7 @@ export default socketServer({
 })
 ```
 
-Each handler function takes three arguments: A data argument, 
+Each handler function takes three arguments: A data argument,
 
 
 
