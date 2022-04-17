@@ -84,7 +84,28 @@ export default async function getUsers({ query, res } : Context) {
 }
 ```
 
-For parametric routes, middleware, fallback handlers, error handling, body parsing, and customization see the following subsections.
+For extended context types, parametric routes, middleware, fallback handlers, error handling, body parsing, and customization see the following subsections.
+
+### Extend Context Types
+
+Middleware my attach additional properties to the context object. Declare the extended type of the context object when you instantiate the server like so:
+
+```ts
+import { Server, Context, USE } from 'bed/core.ts';
+
+interface MyContext extends Context {
+	myValue: string
+}
+
+function attachMyValue(ctx: MyContext) {
+	ctx.myValue = "hello!";
+	ctx.next();
+}
+
+await new Server<MyContext>({
+	[USE]: [logging, attachMyValue]
+}).listen(8080);
+```
 
 ### Parametric Routes
 
@@ -343,41 +364,90 @@ const server = new Server(handlers, { prehandlers: [myLowLevelMiddleware] });
 await server.listen(8080);
 ```
 
-## Sockets
+## Supplementary Modules
 
-A small socket library is exposed from the `./socket.ts` module. It can be used for both front-end and back-end uses. The default export of this library is a function which takes a configuration object specifying the event handlers, and returns a prehandler/middleware which can be loaded into a Bed server.
+The library exposes several supplementary modules which can be imported as needed. These have yet to be documented but all expose fairly simple APIs.
 
-```ts
-// ./socketHandlers.ts
-
-import { default as socketServer } from 'bed/socket.ts';
-
-export default socketServer({
-	sayHello: () => {
-		console.log("hello!");
-	}
-})
-```
-
-Each handler function takes three arguments: A data argument,
-
-
-
-
-Load it as a prehandler.
+### Cookies
 
 ```ts
-import { Server } from 'bed/core.ts';
-import handlers from './api.ts';
-import { myLowLevelMiddleware } from './utils.ts'
+// server.ts
+import { CookiesContext, cookies } from 'bed/cookie.ts';
+import type { Context } from 'bed/core.ts';
 
-const server = new Server(handlers, { prehandlers: [myLowLevelMiddleware] });
-await server.listen(8080);
+export type Ctx = Context & CookiesContext;
+
+await new Server<Ctx>({
+  [USE]: [cookies],
+  auth: {
+    login,
+    me
+  }
+}).listen(8080)
+
+// login.ts
+
+export async function login(ctx: Ctx) {
+  // ...
+  ctx.addCookie({
+    name: "mySession",
+    value: "jk32jfk49134",
+    expires,
+  })
+  // ...
+}
+
+// me.ts
+
+export async function me(ctx: Ctx) {
+  const { cookies: { mySession } } = ctx;
+  // ...
+}
+
 ```
 
-## Static
+Here is the CookiesContext exported by `cookie.ts`:
 
-## Logger
+```ts
+import type { Cookie } from 'https://deno.land/std@0.125.0/http/cookie.ts'
 
-## Validator
+export interface CookiesContext {
+	cookies: Record<string, string>
+	addCookie: (cookie: Cookie) => void;
+	outgoingCookies: Cookie[]
+ }
+```
+
+### Static
+
+Just a thin wrapper around https://deno.land/x/static_files@1.1.6/mod.ts.
+
+```ts
+import { serveStatic } from 'bed/static.ts';
+
+await new Server({
+  [USE]: [serveStatic("..", "public")],
+  auth: {
+    login,
+    me
+  }
+}).listen(8080)
+```
+
+
+### Logger
+
+```ts
+import { logging } from 'bed/logger.ts';
+
+await new Server({
+  [USE]: [logging],
+  auth: {
+    login,
+    me
+  }
+}).listen(8080)
+```
+
+### Validator
 
