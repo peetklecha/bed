@@ -14,7 +14,7 @@ const logging: Handler<Context> = async (ctx) => {
   const end = performance.now();
   const { method } = requestEvent.request;
   const { fullPathString } = processedUrl;
-  const status = formattedStatus(ctx.extras.responseStatus);
+  const status = formattedStatus(ctx.getStatus());
   const time = `${(+end - +start).toFixed(2)}ms`;
   console.log(`${method} ${fullPathString} ${status || ""} ${time}`);
 };

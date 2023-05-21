@@ -93,7 +93,10 @@ class Server<UserDefinedContext extends c.Context> {
     }
     if (FALLBACK in config) output[FALLBACK] = config[FALLBACK];
     else if (parent === null) {
-      output[FALLBACK] = async ({ res }) => await res(404);
+      output[FALLBACK] = ({ setStatus }) => {
+        setStatus(404);
+        return "Not found.";
+      };
     }
     // typescript made me do it this way
     if (ERROR in config) output[ERROR] = config[ERROR];

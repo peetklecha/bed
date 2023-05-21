@@ -1,8 +1,12 @@
+import {
+  Cookie,
+  getCookies,
+  setCookie,
+} from "https://deno.land/std@0.125.0/http/cookie.ts";
 import type { Server } from "../core.ts";
 import type {
   AnnotatedConfig,
   Handler,
-  Sendable,
   SupportedMethodString,
 } from "./types.ts";
 
@@ -16,7 +20,7 @@ import {
   POST,
   PUT,
 } from "./symbols.ts";
-import { isBodyInit, PublicError } from "./util.ts";
+import { assignHeaders, isBodyInit, PublicError } from "./util.ts";
 
 const decoder = new TextDecoder();
 
@@ -32,10 +36,22 @@ export class Context {
   #bodyPromise: Promise<ReturnType<JSON["parse"]>> = Promise.resolve();
   #endpoint: AnnotatedConfig<Context> = { [PARENT]: null };
 
+  #responseBody: unknown = null;
+  #responseStatus = 200;
+  #responseHeaders = new Headers();
+  #responseSent = false;
+
+  #cookies: Record<string, string> | null = null;
+  get cookies() {
+    if (!this.#cookies) {
+      this.#cookies = getCookies(this.requestEvent.request.headers);
+    }
+    return this.#cookies;
+  }
+
   query: Record<string, unknown> = {};
   params: Record<string, string> = {};
   err: Error | null = null;
-  extras: Record<string, unknown> = {};
 
   constructor(public requestEvent: Deno.RequestEvent) {}
   init<UserDefinedContext extends Context>(server: Server<UserDefinedContext>) {
@@ -68,8 +84,14 @@ export class Context {
     try {
       if (err) throw err;
       const { value: handler, done } = this.#handlersIterator.next();
-      if (!done) return await handler(this);
-      else throw new Error("Can't call next -- no more handlers!");
+      if (!done) {
+        const value = await handler(this);
+        if (value !== undefined) {
+          if (this.#responseBody) throw new Error("Response already sent.");
+          this.#responseBody = value;
+          await this.#res();
+        }
+      } else throw new Error("Can't call next -- no more handlers!");
     } catch (err) {
       await this.#handleError(err);
     }
@@ -93,51 +115,65 @@ export class Context {
     return Context.symbols[method];
   }
 
-  res = async (
-    first?: number | Sendable,
-    second?: Sendable,
-    responseParams?: Partial<ResponseInit>,
-  ) => {
-    const headers = new Headers(responseParams?.headers);
-    const status = typeof first === "number"
-      ? first
-      : first === undefined
-      ? 204
-      : 200;
-    let unserializedBody: Sendable | null;
+  getHeaders() {
+    return this.#responseHeaders;
+  }
 
-    if (
-      typeof first === "number" && second === undefined || first === undefined
-    ) unserializedBody = null;
-    else if (second === undefined) unserializedBody = first as Sendable;
-    else unserializedBody = second;
+  setHeaders(headers: HeadersInit) {
+    this.#responseHeaders = new Headers(headers);
+  }
+
+  assignHeaders = (...headers: HeadersInit[]) => {
+    assignHeaders(this.#responseHeaders, ...headers);
+  };
+
+  getStatus() {
+    return this.#responseStatus;
+  }
+
+  setStatus(status: number) {
+    this.#responseStatus = status;
+  }
+
+  setCookie(cookie: Cookie) {
+    setCookie(this.#responseHeaders, cookie);
+  }
+
+  #res = async () => {
+    if (this.#responseSent) throw new Error("Response already sent.");
+    const unserializedBody = this.#responseBody;
+    const status = this.#responseStatus;
+    const headers = this.#responseHeaders;
 
     let body: BodyInit | null;
-    if (unserializedBody && !isBodyInit(unserializedBody)) {
+    if (unserializedBody === null) {
+      body = unserializedBody;
+    } else if (isBodyInit(unserializedBody)) {
+      body = unserializedBody;
+    } else {
       body = JSON.stringify(unserializedBody);
       if (!headers.get("Content-Type")) {
         headers.append("Content-Type", "application/json");
       }
-    } else {
-      body = unserializedBody;
     }
-
-    this.extras.responseStatus = status;
-    this.extras.responseBody = body;
+    this.#responseSent = true;
     await this.requestEvent.respondWith(
-      new Response(body, { status, ...responseParams, headers }),
+      new Response(body, { status, headers }),
     );
   };
 
-  redirect = (url: string, responseParams?: Partial<ResponseInit>) => {
-    const headers = new Headers(responseParams?.headers);
-    headers.set("location", url);
-    const response = new Response(null, {
-      status: 302,
-      ...responseParams,
-      headers,
-    });
-    return this.requestEvent.respondWith(response);
+  redirect = (url: string) => {
+    this.setHeaders({ location: url });
+    this.setStatus(302);
+    return "";
+    // const headers = new Headers(responseParams?.headers);
+    // headers.set("location", url);
+    // const response = new Response(null, {
+    //   status: 302,
+    //   ...responseParams,
+    //   headers,
+    // });
+    // return this.requestEvent.respondWith(response);
   };
 
   async #getBody() {
@@ -153,7 +189,9 @@ export class Context {
 
   async #handleError(err: Error): Promise<void> {
     if (err instanceof PublicError) {
-      return await this.res(err.statusCode, err.message);
+      this.#responseStatus = err.statusCode;
+      this.#responseBody = err.message;
+      return await this.#res();
     }
     try {
       // use nearest user-defined error handler, if one exists
@@ -163,7 +201,8 @@ export class Context {
         endpoint = endpoint[PARENT];
       }
       if (endpoint && ERROR in endpoint) {
-        return await endpoint[ERROR]!(this as ErrorContext);
+        this.#responseBody = await endpoint[ERROR]!(this as ErrorContext);
+        return await this.#res();
       }
     } catch (err) {
       // log any errors that occur within user-defined error handlers
@@ -173,7 +212,8 @@ export class Context {
       console.error(err);
     }
     // otherwise just send 500
-    await this.res(500).catch(console.error);
+    this.#responseStatus = 500;
+    await this.#res().catch(console.error);
   }
 
   static methodIsSupported(
