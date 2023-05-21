@@ -88,8 +88,22 @@ class Server<UserDefinedContext extends c.Context> {
     parent: AnnotatedConfig<UserDefinedContext> | null = null,
   ) {
     const output: AnnotatedConfig<UserDefinedContext> = { [PARENT]: parent };
+    let hasSeenParam = "";
     for (const key of Object.getOwnPropertyNames(config)) {
-      output[key] = this.#annotateConfig(config[key], output);
+      if (key.startsWith("$")) {
+        if (hasSeenParam) {
+          throw new Error(
+            `Cannot define multiple parametric handlers for the same route: ${hasSeenParam}, ${key}`,
+          );
+        }
+        hasSeenParam = key;
+        output[PARAM] = this.#annotateConfig(
+          { ...config[key], [ALIAS]: key.slice(1) },
+          output,
+        ) as AnnotatedParamConfig<UserDefinedContext>;
+      } else {
+        output[key] = this.#annotateConfig(config[key], output);
+      }
     }
     if (FALLBACK in config) output[FALLBACK] = config[FALLBACK];
     else if (parent === null) {
@@ -115,6 +129,7 @@ class Server<UserDefinedContext extends c.Context> {
       ) as AnnotatedParamConfig<UserDefinedContext>;
     }
     if (isParamConfig(config)) output[ALIAS] = config[ALIAS];
+
     return output;
   }
 
@@ -142,3 +157,9 @@ export {
 };
 export type { Config, Handler, Prehandler, Sendable };
 export { Context } from "./lib/context.ts";
+
+export function hasStringParam<UserDefinedContext extends c.Context>(
+  endpoint: AnnotatedConfig<UserDefinedContext>,
+): string | undefined {
+  return Object.keys(endpoint).find((key) => key.startsWith("$"));
+}
