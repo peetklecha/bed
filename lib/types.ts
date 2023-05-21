@@ -60,7 +60,7 @@ export type Prehandler = ((
   event: Deno.RequestEvent,
 ) => Promise<boolean>);
 
-export type Sendable = string | boolean | null | (Sendable | number)[] | {
+export type Sendable = BodyInit | null | (Sendable | number)[] | {
   [key: string]: (Sendable | number);
 };
 export type Recievable = string | boolean | null | number | Recievable[] | {

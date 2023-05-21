@@ -16,7 +16,7 @@ import {
   POST,
   PUT,
 } from "./symbols.ts";
-import { PublicError } from "./util.ts";
+import { isBodyInit, PublicError } from "./util.ts";
 
 const decoder = new TextDecoder();
 
@@ -37,7 +37,7 @@ export class Context {
   err: Error | null = null;
   extras: Record<string, unknown> = {};
 
-	constructor(public requestEvent: Deno.RequestEvent) {}
+  constructor(public requestEvent: Deno.RequestEvent) {}
   init<UserDefinedContext extends Context>(server: Server<UserDefinedContext>) {
     const { path, queryString } = this.processedUrl;
     const { endpoint, params, handlers } = server.traverseEndpoint(
@@ -45,13 +45,15 @@ export class Context {
       this.#methodSymbol,
     );
 
-    this.#handlersIterator = handlers[Symbol.iterator]() as IterableIterator<Handler<Context>>;
+    this.#handlersIterator = handlers[Symbol.iterator]() as IterableIterator<
+      Handler<Context>
+    >;
     this.#bodyPromise = server.jsonBody ? this.#getBody() : Promise.resolve();
     this.#endpoint = endpoint as AnnotatedConfig<Context>;
 
     this.query = Object.fromEntries(new URLSearchParams(queryString));
     this.params = params;
-		return this;
+    return this;
   }
 
   getBody = async () => {
@@ -91,29 +93,52 @@ export class Context {
     return Context.symbols[method];
   }
 
-  res = async (first?: number | Sendable, second?: Sendable, responseParams?: Partial<ResponseInit>) => {
+  res = async (
+    first?: number | Sendable,
+    second?: Sendable,
+    responseParams?: Partial<ResponseInit>,
+  ) => {
+    const headers = new Headers(responseParams?.headers);
     const status = typeof first === "number"
       ? first
       : first === undefined
       ? 204
       : 200;
-    const body =
+    let unserializedBody: Sendable | null;
+
+    if (
       typeof first === "number" && second === undefined || first === undefined
-        ? null
-        : JSON.stringify(second === undefined ? first : second);
-		const headers = new Headers(responseParams?.headers);
-		headers.append("Content-Type", "application/json");
-		this.extras.responseStatus = status;
-		this.extras.responseBody = body;
-    await this.requestEvent.respondWith(new Response(body, { status, ...responseParams, headers }));
+    ) unserializedBody = null;
+    else if (second === undefined) unserializedBody = first as Sendable;
+    else unserializedBody = second;
+
+    let body: BodyInit | null;
+    if (unserializedBody && !isBodyInit(unserializedBody)) {
+      body = JSON.stringify(unserializedBody);
+      if (!headers.get("Content-Type")) {
+        headers.append("Content-Type", "application/json");
+      }
+    } else {
+      body = unserializedBody;
+    }
+
+    this.extras.responseStatus = status;
+    this.extras.responseBody = body;
+    await this.requestEvent.respondWith(
+      new Response(body, { status, ...responseParams, headers }),
+    );
   };
 
-	redirect = (url: string, responseParams?: Partial<ResponseInit>) => {
-		const headers = new Headers(responseParams?.headers);
-		headers.set('location', url);
-		const response = new Response(null, { status: 302, ...responseParams, headers });
-		return this.requestEvent.respondWith(response);
-	}
+  redirect = (url: string, responseParams?: Partial<ResponseInit>) => {
+    const headers = new Headers(responseParams?.headers);
+    headers.set("location", url);
+    const response = new Response(null, {
+      status: 302,
+      ...responseParams,
+      headers,
+    });
+    return this.requestEvent.respondWith(response);
+  };
 
   async #getBody() {
     try {
@@ -135,8 +160,8 @@ export class Context {
       this.err = err;
       let endpoint: AnnotatedConfig<this> | null = this.#endpoint;
       while (endpoint && !(ERROR in endpoint)) {
-				endpoint = endpoint[PARENT];
-			}
+        endpoint = endpoint[PARENT];
+      }
       if (endpoint && ERROR in endpoint) {
         return await endpoint[ERROR]!(this as ErrorContext);
       }

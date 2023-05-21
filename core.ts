@@ -13,6 +13,7 @@ import {
 } from "./lib/symbols.ts";
 import {
   AnnotatedConfig,
+  AnnotatedParamConfig,
   Config,
   Handler,
   hasParam,
@@ -20,17 +21,18 @@ import {
   isParamConfig,
   Prehandler,
   Sendable,
-	AnnotatedParamConfig
 } from "./lib/types.ts";
-import { Context } from "./lib/context.ts";
+import * as c from "./lib/context.ts";
 import { loadMiddleware, PublicError, push } from "./lib/util.ts";
 
-class Server<UserDefinedContext extends Context> {
+const { Context } = c;
+
+class Server<UserDefinedContext extends c.Context> {
   config: AnnotatedConfig<UserDefinedContext>;
   server: Deno.Listener | null = null;
   prehandlers: Prehandler[];
   jsonBody: boolean;
-  [key: string]: unknown
+  [key: string]: unknown;
 
   constructor(
     apiConfig: Config<UserDefinedContext>,
@@ -46,7 +48,7 @@ class Server<UserDefinedContext extends Context> {
 
   async listen(port: number) {
     this.server = Deno.listen({ port });
-		console.log(`Listening ${port}`);
+    console.log(`Listening ${port}`);
     for await (const conn of this.server) {
       this.#handle(conn).catch(console.error);
     }
@@ -81,7 +83,7 @@ class Server<UserDefinedContext extends Context> {
     return { endpoint, params, handlers };
   }
 
-  static #annotateConfig<UserDefinedContext extends Context>(
+  static #annotateConfig<UserDefinedContext extends c.Context>(
     config: Config<UserDefinedContext>,
     parent: AnnotatedConfig<UserDefinedContext> | null = null,
   ) {
@@ -93,7 +95,7 @@ class Server<UserDefinedContext extends Context> {
     else if (parent === null) {
       output[FALLBACK] = async ({ res }) => await res(404);
     }
-		// typescript made me do it this way
+    // typescript made me do it this way
     if (ERROR in config) output[ERROR] = config[ERROR];
     if (GET in config) output[GET] = config[GET];
     if (PUT in config) output[PUT] = config[PUT];
@@ -101,10 +103,13 @@ class Server<UserDefinedContext extends Context> {
     if (DELETE in config) output[DELETE] = config[DELETE];
     if (USE in config) output[USE] = config[USE];
     if (PARAM in config) {
-			if (!isParamConfig(config[PARAM]!)) {
+      if (!isParamConfig(config[PARAM]!)) {
         throw new Error("Parametric routes must have an alias");
       }
-      output[PARAM] = this.#annotateConfig(config[PARAM]!, output) as AnnotatedParamConfig<UserDefinedContext>;
+      output[PARAM] = this.#annotateConfig(
+        config[PARAM]!,
+        output,
+      ) as AnnotatedParamConfig<UserDefinedContext>;
     }
     if (isParamConfig(config)) output[ALIAS] = config[ALIAS];
     return output;
@@ -132,4 +137,5 @@ export {
   Server,
   USE,
 };
-export type { Config, Context, Handler, Prehandler, Sendable };
+export type { Config, Handler, Prehandler, Sendable };
+export { Context } from "./lib/context.ts";

@@ -30,3 +30,12 @@ export class PublicError extends Error {
     super(message);
   }
 }
+
+export function isBodyInit(obj: unknown): obj is BodyInit {
+  return typeof obj === "string"
+    || obj instanceof Blob
+    || obj instanceof ArrayBuffer
+    || obj instanceof FormData
+    || obj instanceof URLSearchParams
+    || obj instanceof ReadableStream
+}
