@@ -33,7 +33,7 @@ export class Context {
   };
 
   #handlersIterator: IterableIterator<Handler<Context>> = [][Symbol.iterator]();
-  #bodyPromise: Promise<ReturnType<JSON["parse"]>> = Promise.resolve();
+  #bodyPromise: Promise<never> = Promise.resolve({} as never);
   #endpoint: AnnotatedConfig<Context> = { [PARENT]: null };
 
   #responseBody: unknown = null;
@@ -49,7 +49,7 @@ export class Context {
     return this.#cookies;
   }
 
-  query: Record<string, unknown> = {};
+  query: never = {} as never;
   params: Record<string, string> = {};
   err: Error | null = null;
 
@@ -64,17 +64,21 @@ export class Context {
     this.#handlersIterator = handlers[Symbol.iterator]() as IterableIterator<
       Handler<Context>
     >;
+    // @ts-expect-error #bodyPromise typed as never for obscure reasons
     this.#bodyPromise = server.jsonBody ? this.#getBody() : Promise.resolve();
     this.#endpoint = endpoint as AnnotatedConfig<Context>;
 
-    this.query = Object.fromEntries(new URLSearchParams(queryString));
+    // @ts-expect-error query is actually Record<string, unknown> but needs `never` for obscure reasons
+    this.query = Object.fromEntries(
+      new URLSearchParams(queryString),
+    );
     this.params = params;
     return this;
   }
 
   getBody = async () => {
     const body = (await this.#bodyPromise) || {};
-    if (MALFORMED_BODY in body) {
+    if (typeof body === "object" && body && MALFORMED_BODY in body) {
       throw new Error("There was an error parsing the request body as JSON.");
     }
     return body;
@@ -166,14 +170,6 @@ export class Context {
     this.setHeaders({ location: url });
     this.setStatus(302);
     return "";
-    // const headers = new Headers(responseParams?.headers);
-    // headers.set("location", url);
-    // const response = new Response(null, {
-    //   status: 302,
-    //   ...responseParams,
-    //   headers,
-    // });
-    // return this.requestEvent.respondWith(response);
   };
 
   async #getBody() {

@@ -14,15 +14,17 @@ import {
 } from "./symbols.ts";
 import type { Context, ErrorContext } from "./context.ts";
 
-export interface Config<UserDefinedContext extends Context> {
+export interface Config<
+  UserDefinedContext extends Context,
+> {
   [key: string]: Config<UserDefinedContext>;
   [PARAM]?: ParamConfig<UserDefinedContext>;
   [USE]?: Handler<UserDefinedContext>[];
-  [GET]?: HandlerSpec<UserDefinedContext>;
-  [PUT]?: HandlerSpec<UserDefinedContext>;
-  [POST]?: HandlerSpec<UserDefinedContext>;
-  [DELETE]?: HandlerSpec<UserDefinedContext>;
-  [FALLBACK]?: HandlerSpec<UserDefinedContext>;
+  [GET]?: Handler<UserDefinedContext>;
+  [PUT]?: Handler<UserDefinedContext>;
+  [POST]?: Handler<UserDefinedContext>;
+  [DELETE]?: Handler<UserDefinedContext>;
+  [FALLBACK]?: Handler<UserDefinedContext>;
   [ERROR]?: ErrorHandler;
 }
 
@@ -43,6 +45,10 @@ export interface AnnotatedConfigWithParam<UserDefinedContext extends Context>
   [PARAM]: AnnotatedParamConfig<UserDefinedContext>;
 }
 
+export type _AnnotatedParamConfig<UDC extends Context, T extends string> = {
+  [ALIAS]: T;
+} & AnnotatedConfig<UDC & { params: { [Key in T]: string } }>;
+
 export interface AnnotatedParamConfig<UserDefinedContext extends Context>
   extends AnnotatedConfig<UserDefinedContext> {
   [ALIAS]: string;
@@ -55,7 +61,7 @@ export interface ParamConfig<UserDefinedContext extends Context>
 
 export interface ConfigWithFallback<UserDefinedContext extends Context>
   extends AnnotatedConfig<UserDefinedContext> {
-  [FALLBACK]: HandlerSpec<UserDefinedContext>;
+  [FALLBACK]: Handler<UserDefinedContext>;
 }
 
 export type HandlerReturnValue =
@@ -64,13 +70,15 @@ export type HandlerReturnValue =
   | void
   | Promise<void>;
 
-export type Handler<UserDefinedContext extends Context> = (
-  ctx: UserDefinedContext,
-) => HandlerReturnValue;
+export type Handler<
+  UserDefinedContext extends Context, //<Query, Body>,
+> // Query extends {} = Record<string, unknown>,
+ = // Body extends {} = Record<string, unknown>,
+  (
+    ctx: UserDefinedContext,
+  ) => HandlerReturnValue;
+
 type ErrorHandler = (errCtx: ErrorContext) => HandlerReturnValue;
-export type HandlerSpec<UserDefinedContext extends Context> =
-  | Handler<UserDefinedContext>
-  | Handler<UserDefinedContext>[];
 
 export type Prehandler = (
   event: Deno.RequestEvent,
@@ -110,3 +118,21 @@ export function hasFallback<UserDefinedContext extends Context>(
 }
 
 export type SupportedMethodString = "GET" | "PUT" | "POST" | "DELETE";
+
+export function asAPI<
+  UserDefinedContext extends Context,
+>(cfg: Config<UserDefinedContext>): typeof cfg {
+  return cfg;
+}
+
+export type WithQuery<UserContext extends Context, Query extends {}> =
+  & Omit<UserContext, "query">
+  & {
+    query: Query;
+  };
+
+export type WithBody<UserContext extends Context, Body extends {}> =
+  & Omit<UserContext, "getBody">
+  & {
+    getBody: () => Promise<Body>;
+  };
