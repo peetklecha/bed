@@ -1,8 +1,22 @@
+/// <reference no-default-lib="true" />
+/// <reference lib="dom" />
+/// <reference lib="dom.iterable" />
+/// <reference lib="dom.asynciterable" />
+/// <reference lib="deno.ns" />
+
 import { DELETE, GET, PARAM, POST, PUT, Sendable } from "./core.ts";
 import { MethodSymbol } from "./lib/symbols.ts";
 
 type ClientConfig = {
-  baseUrl: string;
+  baseUrl?: string;
+};
+
+type ApiResult<T = unknown> = {
+  err: number;
+  res: string;
+} | {
+  err: null;
+  res: T;
 };
 
 function collector(
@@ -12,21 +26,25 @@ function collector(
 ): unknown {
   async function finalize(
     arg: Record<string, string> = {},
-  ): Promise<[null, unknown] | [number, string]> {
+  ): Promise<ApiResult> {
     let route = accum.join("/");
     if (method === "GET" || method === "DELETE") {
       if (Object.keys(arg).length) {
         route += "?" + new URLSearchParams(arg);
       }
     }
-    const path = new URL(route, config.baseUrl);
-    const init: RequestInit = {};
+    console.log({
+      baseUrl: config.baseUrl,
+      origin,
+    });
+    const path = new URL(route, config.baseUrl ?? origin);
+    const init: RequestInit = { method };
     if (method === "POST" || method === "PUT") init.body = JSON.stringify(arg);
     const res = await fetch(path, init);
     if (res.ok) {
-      return [null, await res.json()];
+      return { err: null, res: await res.json() };
     } else {
-      return [res.status, res.statusText];
+      return { err: res.status, res: res.statusText };
     }
   }
   return new Proxy(finalize, {
@@ -56,54 +74,110 @@ export type ClientsideAPI = {
 };
 
 export type Client<Config extends ClientsideAPI> = {
-  get: Route<typeof GET, Config>;
-  put: Route<typeof PUT, Config>;
-  post: Route<typeof POST, Config>;
-  delete: Route<typeof DELETE, Config>;
+  get: Midpoint<typeof GET, Config>;
+  put: Midpoint<typeof PUT, Config>;
+  post: Midpoint<typeof POST, Config>;
+  delete: Midpoint<typeof DELETE, Config>;
 };
 
-type Route<
+export type Midpoint<
   Method extends MethodSymbol,
   Config extends ClientsideAPI,
-> =
-  & {
-    [Key in keyof Config]: Key extends `$${string}` ? never
-      : Key extends string ? Route<Method, Config[Key]>
-      : never;
-  }
-  & (Method extends keyof Config ? Trigger<Method, Config>
-    : {})
-  & (HasParam<keyof Config> extends never ? {}
-    : Record<
-      string,
-      Route<Method, Config[HasParam<keyof Config>]>
-    >);
+> = Method extends keyof Config
+  ? Trigger<Method, Config> & NonTerminal<Method, Config>
+  : NonTerminal<Method, Config>;
 
-type Trigger<
+export type NonTerminal<
+  Method extends MethodSymbol,
+  Config extends ClientsideAPI,
+> = {
+  [
+    Key in keyof Config as Key extends typeof PARAM ? string | number
+      : Key extends string ? Key
+      : never
+  ]: Midpoint<Method, Config[Key]>;
+};
+
+// export type Route<
+//   Method extends MethodSymbol,
+//   Config extends ClientsideAPI,
+// > =
+//   & {
+//     [
+//       Key in keyof Config as Key extends typeof PARAM ? string | number
+//         : Key extends string ? Key
+//         : never
+//     ]: Route<Method, Config[Key]>;
+//   }
+//   & (Method extends keyof Config ? Trigger<Method, Config>
+//     : {});
+// & (HasParam<keyof Config> extends never ? {}
+//   : Record<
+//     string,
+//     Route<Method, Config[HasParam<keyof Config>]>
+//   >);
+
+type Result<
+  Func extends (...args: any[]) => any,
+> = Promise<ApiResult<Await<ReturnType<Func>>>>;
+
+type Effect<ParamType, ReturnType> = (arg: ParamType) => ReturnType;
+
+export type Trigger<
   Method extends MethodSymbol,
   Config extends ClientsideAPI,
 > = Config[Method] extends (...args: any[]) => any
   ? Parameters<Config[Method]> extends [infer Ctx]
     ? Method extends typeof GET | typeof DELETE
-      ? Ctx extends { query: infer Query } ? (
-          query: Query,
-        ) => Promise<
-          | readonly [null, Await<ReturnType<Config[Method]>>]
-          | readonly [number, string]
-        >
+      ? "query" extends keyof Ctx
+        ? Ctx["query"] extends never ? () => Result<Config[Method]>
+        : "query" extends keyof Ctx
+          ? Effect<Ctx["query"], Result<Config[Method]>> //(query: Ctx["query"]) => Result<Config[Method]>
+        : never
       : never
-    : Ctx extends { getBody: () => Promise<infer Body> } ? (
-        query: Body,
-      ) => Promise<
-        | readonly [null, Await<ReturnType<Config[Method]>>]
-        | readonly [number, string]
-      >
+    : "getBody" extends keyof Ctx
+      ? Ctx["getBody"] extends (...args: any) => any
+        ? Ctx["getBody"] extends never ? () => Result<Config[Method]>
+        : Effect<Await<ReturnType<Ctx["getBody"]>>, Result<Config[Method]>>
+      : never
     : never
   : never
   : never;
 
-type HasParam<Z extends {}> = keyof {
-  [Key in Z as Key extends `$${string}` ? Key : never]: Key;
-};
+// type HasParam<Z extends {}> = keyof {
+//   [Key in Z as Key extends `$${string}` ? Key : never]: Key;
+// };
 
 type Await<T> = T extends Promise<infer U> ? U : T;
+
+// const x = {
+//   hello: {
+//     [GET]: (ctx: Context) => {
+//       return {};
+//     },
+//   },
+// };
+
+// type Method = typeof GET;
+// type Config = typeof x.hello;
+
+// type z = Trigger<typeof GET, typeof x.hello>;
+// type m = Midpoint<typeof GET, typeof x.hello>;
+// type m_ = typeof GET extends keyof typeof x.hello ? 1 : 0;
+// type m__1 = Trigger<Method, Config>;
+// type m__2 = NonTerminal<Method, Config>;
+// type m__1_ = Config[Method] extends (...args: any) => any ? 1 : 0;
+// type m__1__ = Parameters<Config[Method]> extends [infer Ctx] ? Ctx : never;
+// type m__1___ = never extends never ? () => Result<Config[Method]> : 0;
+// // type m__1____ = Effect<never, Result<Config[Method]>>;
+
+// type zz = Method extends typeof GET | typeof DELETE ? Ctxx : never;
+// type zzz = m__1__ extends { query: infer Query } ? Query : 0;
+
+// // type c = Effect<never, 1>;
+
+// type _Effect<X, Y> = (arg: X) => Y;
+
+// type Y<Z> = "a" extends keyof Z ? (arg: Z["a"]) => void : never;
+// type YYY<Z> = "a" extends keyof Z ? _Effect<Z["a"], void> : never;
+// type YY<Z> = "a" extends keyof Z ? Z["a"] : never;

@@ -65,10 +65,9 @@ export interface ConfigWithFallback<UserDefinedContext extends Context>
 }
 
 export type HandlerReturnValue =
-  | Promise<Sendable>
+  | Promise<void | Sendable>
   | Sendable
-  | void
-  | Promise<void>;
+  | void;
 
 export type Handler<
   UserDefinedContext extends Context, //<Query, Body>,
@@ -88,7 +87,7 @@ export type Sendable =
   | BodyInit
   | null
   | unknown[]
-  | Record<string | number | symbol, unknown>;
+  | (object & {});
 export type Recievable = string | boolean | null | number | Recievable[] | {
   [key: string]: Recievable;
 };

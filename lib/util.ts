@@ -24,13 +24,6 @@ export function loadMiddleware<UserDefinedContext extends Context>(
   }
 }
 
-export class PublicError extends Error {
-  errorMessageCanBeViewedByClient = true;
-  constructor(public statusCode: number, message: string) {
-    super(message);
-  }
-}
-
 export function isBodyInit(obj: unknown): obj is BodyInit {
   return typeof obj === "string" ||
     obj instanceof Blob ||

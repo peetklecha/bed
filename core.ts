@@ -23,7 +23,7 @@ import {
   Sendable,
 } from "./lib/types.ts";
 import * as c from "./lib/context.ts";
-import { loadMiddleware, PublicError, push } from "./lib/util.ts";
+import { loadMiddleware, push } from "./lib/util.ts";
 
 const { Context } = c;
 
@@ -142,21 +142,11 @@ class Server<UserDefinedContext extends c.Context> {
   }
 }
 
-export {
-  ALIAS,
-  DELETE,
-  ERROR,
-  FALLBACK,
-  GET,
-  PARAM,
-  POST,
-  PublicError,
-  PUT,
-  Server,
-  USE,
-};
+export { ALIAS, DELETE, ERROR, FALLBACK, GET, PARAM, POST, PUT, Server, USE };
 export type { Config, Handler, Prehandler, Sendable };
 export { Context } from "./lib/context.ts";
+export type { WithBody, WithQuery } from "./lib/types.ts";
+export { PublicError } from "./error.ts";
 
 export function hasStringParam<UserDefinedContext extends c.Context>(
   endpoint: AnnotatedConfig<UserDefinedContext>,

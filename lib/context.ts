@@ -20,7 +20,8 @@ import {
   POST,
   PUT,
 } from "./symbols.ts";
-import { assignHeaders, isBodyInit, PublicError } from "./util.ts";
+import { assignHeaders, isBodyInit } from "./util.ts";
+import { PublicError } from "../error.ts";
 
 const decoder = new TextDecoder();
 
@@ -33,7 +34,9 @@ export class Context {
   };
 
   #handlersIterator: IterableIterator<Handler<Context>> = [][Symbol.iterator]();
-  #bodyPromise: Promise<never> = Promise.resolve({} as never);
+  #bodyPromise?: Promise<undefined> = Promise.resolve(
+    {} as unknown as undefined,
+  );
   #endpoint: AnnotatedConfig<Context> = { [PARENT]: null };
 
   #responseBody: unknown = null;
@@ -49,6 +52,7 @@ export class Context {
     return this.#cookies;
   }
 
+  //query?: undefined = {} as unknown as undefined;
   query: never = {} as never;
   params: Record<string, string> = {};
   err: Error | null = null;
@@ -64,7 +68,6 @@ export class Context {
     this.#handlersIterator = handlers[Symbol.iterator]() as IterableIterator<
       Handler<Context>
     >;
-    // @ts-expect-error #bodyPromise typed as never for obscure reasons
     this.#bodyPromise = server.jsonBody ? this.#getBody() : Promise.resolve();
     this.#endpoint = endpoint as AnnotatedConfig<Context>;
 
@@ -76,13 +79,13 @@ export class Context {
     return this;
   }
 
-  getBody = async () => {
+  getBody: never = (async () => {
     const body = (await this.#bodyPromise) || {};
     if (typeof body === "object" && body && MALFORMED_BODY in body) {
       throw new Error("There was an error parsing the request body as JSON.");
     }
     return body;
-  };
+  }) as never;
 
   next = async (err?: Error) => {
     try {
@@ -119,35 +122,44 @@ export class Context {
     return Context.symbols[method];
   }
 
-  getHeaders() {
+  getHeaders = () => {
     return this.#responseHeaders;
-  }
+  };
 
-  setHeaders(headers: HeadersInit) {
+  setHeaders = (headers: HeadersInit) => {
     this.#responseHeaders = new Headers(headers);
-  }
+  };
 
   assignHeaders = (...headers: HeadersInit[]) => {
     assignHeaders(this.#responseHeaders, ...headers);
   };
 
-  getStatus() {
+  getStatus = () => {
     return this.#responseStatus;
-  }
+  };
 
-  setStatus(status: number) {
+  setStatus = (status: number) => {
     this.#responseStatus = status;
-  }
+  };
 
-  setCookie(cookie: Cookie) {
+  setCookie = (cookie: Cookie) => {
     setCookie(this.#responseHeaders, cookie);
-  }
+  };
+
+  #bodyHooks: ((body: unknown) => unknown)[] = [];
+  setBodyHook = (cb: (body: unknown) => unknown) => {
+    this.#bodyHooks.push(cb);
+  };
 
   #res = async () => {
     if (this.#responseSent) throw new Error("Response already sent.");
     const unserializedBody = this.#responseBody;
     const status = this.#responseStatus;
     const headers = this.#responseHeaders;
+
+    for (const cb of this.#bodyHooks) {
+      this.#responseBody = cb(this.#responseBody);
+    }
 
     let body: BodyInit | null;
     if (unserializedBody === null) {
@@ -201,6 +213,11 @@ export class Context {
         return await this.#res();
       }
     } catch (err) {
+      if (err instanceof PublicError) {
+        this.#responseStatus = err.statusCode;
+        this.#responseBody = err.message;
+        return await this.#res();
+      }
       // log any errors that occur within user-defined error handlers
       console.error(
         "Bed Error: An error occurred inside a user-defined error-handler.",
