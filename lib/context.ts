@@ -47,7 +47,7 @@ export class Context {
   #cookies: Record<string, string> | null = null;
   get cookies() {
     if (!this.#cookies) {
-      this.#cookies = getCookies(this.requestEvent.request.headers);
+      this.#cookies = getCookies(this.request.headers);
     }
     return this.#cookies;
   }
@@ -56,8 +56,11 @@ export class Context {
   query: never = {} as never;
   params: Record<string, string> = {};
   err: Error | null = null;
+  request: Request;
 
-  constructor(public requestEvent: Deno.RequestEvent) {}
+  constructor(request: Request) {
+    this.request = request;
+  }
   init<UserDefinedContext extends Context>(server: Server<UserDefinedContext>) {
     const { path, queryString } = this.processedUrl;
     const { endpoint, params, handlers } = server.traverseEndpoint(
@@ -96,16 +99,20 @@ export class Context {
         if (value !== undefined) {
           if (this.#responseBody) throw new Error("Response already sent.");
           this.#responseBody = value;
-          await this.#res();
+          this.#res();
         }
       } else throw new Error("Can't call next -- no more handlers!");
     } catch (err) {
-      await this.#handleError(err);
+      if (err instanceof Error) {
+        await this.#handleError(err);
+      } else {
+        await this.#handleError(new Error(String(err)));
+      }
     }
   };
 
   get processedUrl() {
-    const { requestEvent: { request: { url } } } = this;
+    const { request: { url } } = this;
     const tld = url.slice(url.indexOf("://") + 3);
     const fullPathString = tld.slice(tld.indexOf("/"));
     const [pathString, queryString = ""] = fullPathString.split("?");
@@ -114,7 +121,7 @@ export class Context {
   }
 
   get #methodSymbol() {
-    const { requestEvent: { request } } = this;
+    const { request } = this;
     const method = request.method.toUpperCase();
     if (!Context.methodIsSupported(method)) {
       throw new Error(`Method ${request.method} is not supported.`);
@@ -151,7 +158,7 @@ export class Context {
     this.#bodyHooks.push(cb);
   };
 
-  #res = async () => {
+  #res = () => {
     if (this.#responseSent) throw new Error("Response already sent.");
     const unserializedBody = this.#responseBody;
     const status = this.#responseStatus;
@@ -173,9 +180,7 @@ export class Context {
       }
     }
     this.#responseSent = true;
-    await this.requestEvent.respondWith(
-      new Response(body, { status, headers }),
-    );
+    return new Response(body, { status, headers });
   };
 
   redirect = (url: string) => {
@@ -186,7 +191,7 @@ export class Context {
 
   async #getBody() {
     try {
-      const buffer = await this.requestEvent.request.arrayBuffer();
+      const buffer = await this.request.arrayBuffer();
       const array = new Uint8Array(buffer);
       const string = decoder.decode(array);
       return JSON.parse(string);
@@ -195,11 +200,11 @@ export class Context {
     }
   }
 
-  async #handleError(err: Error): Promise<void> {
+  async #handleError(err: Error): Promise<Response> {
     if (err instanceof PublicError) {
       this.#responseStatus = err.statusCode;
       this.#responseBody = err.message;
-      return await this.#res();
+      return this.#res();
     }
     try {
       // use nearest user-defined error handler, if one exists
@@ -210,13 +215,13 @@ export class Context {
       }
       if (endpoint && ERROR in endpoint) {
         this.#responseBody = await endpoint[ERROR]!(this as ErrorContext);
-        return await this.#res();
+        return this.#res();
       }
     } catch (err) {
       if (err instanceof PublicError) {
         this.#responseStatus = err.statusCode;
         this.#responseBody = err.message;
-        return await this.#res();
+        return this.#res();
       }
       // log any errors that occur within user-defined error handlers
       console.error(
@@ -226,7 +231,7 @@ export class Context {
     }
     // otherwise just send 500
     this.#responseStatus = 500;
-    await this.#res().catch(console.error);
+    return this.#res();
   }
 
   static methodIsSupported(

@@ -30,14 +30,14 @@ const { Context } = c;
 class Server<UserDefinedContext extends c.Context> {
   config: AnnotatedConfig<UserDefinedContext>;
   server: Deno.Listener | null = null;
-  prehandlers: Prehandler[];
+  prehandlers: Prehandler<UserDefinedContext>[];
   jsonBody: boolean;
   [key: string]: unknown;
 
   constructor(
     apiConfig: Config<UserDefinedContext>,
     { prehandlers = [], jsonBody = true }: {
-      prehandlers?: Prehandler[];
+      prehandlers?: Prehandler<UserDefinedContext>[];
       jsonBody?: boolean;
     } = {},
   ) {
@@ -54,6 +54,10 @@ class Server<UserDefinedContext extends c.Context> {
     }
   }
 
+  // async #handle2(conn: Deno.Conn) {
+  //   Deno.serve()
+  // }
+
   async #handle(conn: Deno.Conn) {
     const httpConn = Deno.serveHttp(conn);
     for await (const event of httpConn) {
@@ -62,23 +66,22 @@ class Server<UserDefinedContext extends c.Context> {
     }
   }
 
-  traverseEndpoint(...path: (string | MethodSymbol)[]) {
+  traverseEndpoint(method: MethodSymbol, ...path: string[]) {
     let endpoint = this.config;
     const params: Record<string, string> = {};
     const handlers: Handler<UserDefinedContext>[] = [];
     let endpointSet = false;
     for (const node of path) {
       if (node in endpoint) {
-        if (isMethodSymbol(node)) {
-          push(handlers, endpoint[node]);
-          endpointSet = true;
-        } else endpoint = endpoint[node];
-      } else if (typeof node === "string" && hasParam(endpoint)) {
+        endpoint = endpoint[node];
+      } else if (hasParam(endpoint)) {
         const paramEndpoint = endpoint[PARAM];
         params[paramEndpoint[ALIAS]] = node;
         endpoint = paramEndpoint;
       } else break;
     }
+    push(handlers, endpoint[method]);
+    endpointSet = true;
     loadMiddleware(endpoint, endpointSet, handlers);
     return { endpoint, params, handlers };
   }
@@ -135,7 +138,7 @@ class Server<UserDefinedContext extends c.Context> {
 
   async #preprocess(event: Deno.RequestEvent) {
     for (const prehandler of this.prehandlers) {
-      const done = await prehandler(event);
+      const done = await prehandler(event, this);
       if (done) return true;
     }
     return false;
