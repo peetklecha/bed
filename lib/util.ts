@@ -33,11 +33,13 @@ export function isBodyInit(obj: unknown): obj is BodyInit {
     obj instanceof ReadableStream;
 }
 
-export function assignHeaders(headers: HeadersInit, ...inits: HeadersInit[]) {
-  headers = new Headers(headers);
+export function assignHeaders(init0: HeadersInit, ...inits: HeadersInit[]) {
+  const headers = new Headers(init0);
   for (const init of inits) {
     if (init instanceof Headers || Array.isArray(init)) {
-      for (const [key, value] of init) headers.append(key, value);
+      for (const [key, value] of init as Iterable<[string, string]>) {
+        headers.append(key, value);
+      }
     } else {
       for (const [key, value] of Object.entries(init)) {
         headers.append(key, value);

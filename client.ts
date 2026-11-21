@@ -4,8 +4,15 @@
 /// <reference lib="dom.asynciterable" />
 /// <reference lib="deno.ns" />
 
-import { DELETE, GET, PARAM, POST, PUT, Sendable } from "./core.ts";
-import { MethodSymbol } from "./lib/symbols.ts";
+import type { Sendable } from "./lib/types.ts";
+import {
+  DELETE,
+  GET,
+  type MethodSymbol,
+  PARAM,
+  POST,
+  PUT,
+} from "./lib/symbols.ts";
 
 type ClientConfig = {
   baseUrl?: string;
@@ -33,10 +40,6 @@ function collector(
         route += "?" + new URLSearchParams(arg);
       }
     }
-    console.log({
-      baseUrl: config.baseUrl,
-      origin,
-    });
     const path = new URL(route, config.baseUrl ?? origin);
     const init: RequestInit = { method };
     if (method === "POST" || method === "PUT") init.body = JSON.stringify(arg);

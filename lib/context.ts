@@ -1,8 +1,5 @@
-import {
-  Cookie,
-  getCookies,
-  setCookie,
-} from "https://deno.land/std@0.125.0/http/cookie.ts";
+import { env } from "cloudflare:workers";
+import { type Cookie, getCookies, setCookie } from "./cookie.ts";
 import type { Server } from "../core.ts";
 import type {
   AnnotatedConfig,
@@ -12,6 +9,7 @@ import type {
 
 import {
   DELETE,
+  ENDPOINT_RESPONSE,
   ERROR,
   GET,
   MALFORMED_BODY,
@@ -24,6 +22,14 @@ import { assignHeaders, isBodyInit } from "./util.ts";
 import { PublicError } from "../error.ts";
 
 const decoder = new TextDecoder();
+
+type PreResponse =
+  & { body: BodyInit | null; [ENDPOINT_RESPONSE]: true }
+  & ResponseInit;
+
+const BED_LOG_HANDLERS = (env as { BED_LOG_HANDLERS?: string })
+  .BED_LOG_HANDLERS;
+console.log({ BED_LOG_HANDLERS });
 
 export class Context {
   static symbols: Record<SupportedMethodString, MethodSymbol> = {
@@ -39,10 +45,10 @@ export class Context {
   );
   #endpoint: AnnotatedConfig<Context> = { [PARENT]: null };
 
-  #responseBody: unknown = null;
+  // #responseBody: unknown = null;
   #responseStatus = 200;
   #responseHeaders = new Headers();
-  #responseSent = false;
+  // #responseSent = false;
 
   #cookies: Record<string, string> | null = null;
   get cookies() {
@@ -62,23 +68,25 @@ export class Context {
     this.request = request;
   }
   init<UserDefinedContext extends Context>(server: Server<UserDefinedContext>) {
+    console.log({ BED_LOG_HANDLERS });
     const { path, queryString } = this.processedUrl;
-    const { endpoint, params, handlers } = server.traverseEndpoint(
-      ...path,
+    this.#handlersIterator = server.traverseEndpoint(
       this.#methodSymbol,
-    );
+      this.params,
+      ...path,
+    ) as IterableIterator<Handler<Context>>;
 
-    this.#handlersIterator = handlers[Symbol.iterator]() as IterableIterator<
-      Handler<Context>
-    >;
+    // this.#handlersIterator = handlers[Symbol.iterator]() as IterableIterator<
+    //   Handler<Context>
+    // >;
     this.#bodyPromise = server.jsonBody ? this.#getBody() : Promise.resolve();
-    this.#endpoint = endpoint as AnnotatedConfig<Context>;
+    // this.#endpoint = endpoint as AnnotatedConfig<Context>;
 
     // @ts-expect-error query is actually Record<string, unknown> but needs `never` for obscure reasons
     this.query = Object.fromEntries(
       new URLSearchParams(queryString),
     );
-    this.params = params;
+    // this.params = params;
     return this;
   }
 
@@ -94,19 +102,22 @@ export class Context {
     try {
       if (err) throw err;
       const { value: handler, done } = this.#handlersIterator.next();
+      if (BED_LOG_HANDLERS) {
+        console.log(" ->", handler);
+      }
       if (!done) {
-        const value = await handler(this);
-        if (value !== undefined) {
-          if (this.#responseBody) throw new Error("Response already sent.");
-          this.#responseBody = value;
-          this.#res();
-        }
+        return this.#res(await handler(this));
+        // if (value !== undefined) {
+        //   // if (this.#responseBody) throw new Error("Response already sent.");
+        //   // this.#responseBody = value;
+        //   return this.#res(value);
+        // }
       } else throw new Error("Can't call next -- no more handlers!");
     } catch (err) {
       if (err instanceof Error) {
-        await this.#handleError(err);
+        return await this.#handleError(err);
       } else {
-        await this.#handleError(new Error(String(err)));
+        return await this.#handleError(new Error(String(err)));
       }
     }
   };
@@ -118,6 +129,10 @@ export class Context {
     const [pathString, queryString = ""] = fullPathString.split("?");
     const path = pathString.split("/").filter((x) => !!x);
     return { path, queryString, pathString, fullPathString };
+  }
+
+  get url() {
+    return new URL(this.request.url);
   }
 
   get #methodSymbol() {
@@ -138,7 +153,7 @@ export class Context {
   };
 
   assignHeaders = (...headers: HeadersInit[]) => {
-    assignHeaders(this.#responseHeaders, ...headers);
+    this.#responseHeaders = assignHeaders(this.#responseHeaders, ...headers);
   };
 
   getStatus = () => {
@@ -158,14 +173,22 @@ export class Context {
     this.#bodyHooks.push(cb);
   };
 
-  #res = () => {
-    if (this.#responseSent) throw new Error("Response already sent.");
-    const unserializedBody = this.#responseBody;
+  #res = (unserializedBody: unknown): Response => {
+    if (
+      unserializedBody instanceof Response
+      // typeof unserializedBody === "object" && unserializedBody &&
+      // ENDPOINT_RESPONSE in unserializedBody
+    ) {
+      return unserializedBody;
+    }
+    // if (this.#responseSent) throw new Error("Response already sent.");
+    // const unserializedBody = this.#responseBody;
     const status = this.#responseStatus;
     const headers = this.#responseHeaders;
 
+    let midbody = unserializedBody;
     for (const cb of this.#bodyHooks) {
-      this.#responseBody = cb(this.#responseBody);
+      midbody = cb(midbody);
     }
 
     let body: BodyInit | null;
@@ -179,12 +202,13 @@ export class Context {
         headers.append("Content-Type", "application/json");
       }
     }
-    this.#responseSent = true;
+    // this.#responseSent = true;
     return new Response(body, { status, headers });
+    // return { body, status, headers, [ENDPOINT_RESPONSE]: true };
   };
 
   redirect = (url: string) => {
-    this.setHeaders({ location: url });
+    this.assignHeaders({ location: url });
     this.setStatus(302);
     return "";
   };
@@ -203,8 +227,8 @@ export class Context {
   async #handleError(err: Error): Promise<Response> {
     if (err instanceof PublicError) {
       this.#responseStatus = err.statusCode;
-      this.#responseBody = err.message;
-      return this.#res();
+      // this.#responseBody = err.message;
+      return this.#res(err.message);
     }
     try {
       // use nearest user-defined error handler, if one exists
@@ -214,14 +238,14 @@ export class Context {
         endpoint = endpoint[PARENT];
       }
       if (endpoint && ERROR in endpoint) {
-        this.#responseBody = await endpoint[ERROR]!(this as ErrorContext);
-        return this.#res();
+        // this.#responseBody = ;
+        return this.#res(await endpoint[ERROR]!(this as ErrorContext));
       }
     } catch (err) {
       if (err instanceof PublicError) {
         this.#responseStatus = err.statusCode;
-        this.#responseBody = err.message;
-        return this.#res();
+        // this.#responseBody = err.message;
+        return this.#res(err.message);
       }
       // log any errors that occur within user-defined error handlers
       console.error(
@@ -231,7 +255,7 @@ export class Context {
     }
     // otherwise just send 500
     this.#responseStatus = 500;
-    return this.#res();
+    return this.#res("error");
   }
 
   static methodIsSupported(

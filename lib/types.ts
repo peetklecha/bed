@@ -13,7 +13,7 @@ import {
   USE,
 } from "./symbols.ts";
 import type { Context, ErrorContext } from "./context.ts";
-import type { Server } from "../core.ts";
+// import type { Server } from "../core.ts";
 
 export interface Config<
   UserDefinedContext extends Context,
@@ -80,10 +80,10 @@ export type Handler<
 
 type ErrorHandler = (errCtx: ErrorContext) => HandlerReturnValue;
 
-export type Prehandler<Ctx extends Context> = (
-  event: Deno.RequestEvent,
-  server: Server<Ctx>,
-) => Promise<boolean>;
+// export type Prehandler<Ctx extends Context> = (
+//   event: Deno.RequestEvent,
+//   server: Server<Ctx>,
+// ) => Promise<boolean>;
 
 export type Sendable =
   | BodyInit

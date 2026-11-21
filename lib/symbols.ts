@@ -11,6 +11,8 @@ export const USE = Symbol("USE");
 
 export const MALFORMED_BODY = Symbol("MALFORMED_BODY");
 
+export const ENDPOINT_RESPONSE = Symbol("ENDPOINT_RESPONSE");
+
 export type MethodSymbol =
   | typeof GET
   | typeof PUT

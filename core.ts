@@ -17,73 +17,67 @@ import {
   Config,
   Handler,
   hasParam,
-  isMethodSymbol,
   isParamConfig,
-  Prehandler,
   Sendable,
 } from "./lib/types.ts";
 import * as c from "./lib/context.ts";
-import { loadMiddleware, push } from "./lib/util.ts";
 
 const { Context } = c;
 
 class Server<UserDefinedContext extends c.Context> {
   config: AnnotatedConfig<UserDefinedContext>;
-  server: Deno.Listener | null = null;
-  prehandlers: Prehandler<UserDefinedContext>[];
   jsonBody: boolean;
   [key: string]: unknown;
 
   constructor(
     apiConfig: Config<UserDefinedContext>,
-    { prehandlers = [], jsonBody = true }: {
-      prehandlers?: Prehandler<UserDefinedContext>[];
+    {
+      jsonBody = true,
+    }: {
       jsonBody?: boolean;
     } = {},
   ) {
-    this.prehandlers = prehandlers;
     this.jsonBody = jsonBody;
     this.config = Server.#annotateConfig(apiConfig);
   }
 
-  async listen(port: number) {
-    this.server = Deno.listen({ port });
-    console.log(`Listening ${port}`);
-    for await (const conn of this.server) {
-      this.#handle(conn).catch(console.error);
-    }
-  }
+  fetch = async (req: Request) => {
+    console.log(req);
+    return await new Context(req).init(this)
+      .next();
+  };
 
-  // async #handle2(conn: Deno.Conn) {
-  //   Deno.serve()
-  // }
-
-  async #handle(conn: Deno.Conn) {
-    const httpConn = Deno.serveHttp(conn);
-    for await (const event of httpConn) {
-      if (await this.#preprocess(event)) continue;
-      await new Context(event).init(this).next();
-    }
-  }
-
-  traverseEndpoint(method: MethodSymbol, ...path: string[]) {
+  *traverseEndpoint(
+    method: MethodSymbol,
+    params: Record<string, string>,
+    ...path: string[]
+  ) {
     let endpoint = this.config;
-    const params: Record<string, string> = {};
-    const handlers: Handler<UserDefinedContext>[] = [];
-    let endpointSet = false;
+    yield* endpoint[USE] ?? [];
+    let miss = false;
     for (const node of path) {
       if (node in endpoint) {
         endpoint = endpoint[node];
+        yield* endpoint[USE] ?? [];
       } else if (hasParam(endpoint)) {
         const paramEndpoint = endpoint[PARAM];
         params[paramEndpoint[ALIAS]] = node;
         endpoint = paramEndpoint;
-      } else break;
+        yield* endpoint[USE] ?? [];
+      } else {
+        miss = true;
+      }
     }
-    push(handlers, endpoint[method]);
-    endpointSet = true;
-    loadMiddleware(endpoint, endpointSet, handlers);
-    return { endpoint, params, handlers };
+    if (!miss && endpoint[method]) {
+      yield endpoint[method];
+    } else {
+      let fallback = endpoint[FALLBACK];
+      while (!fallback) {
+        endpoint = endpoint[PARENT]!;
+        fallback = endpoint[FALLBACK];
+      }
+      yield fallback;
+    }
   }
 
   static #annotateConfig<UserDefinedContext extends c.Context>(
@@ -110,11 +104,13 @@ class Server<UserDefinedContext extends c.Context> {
     }
     if (FALLBACK in config) output[FALLBACK] = config[FALLBACK];
     else if (parent === null) {
-      output[FALLBACK] = ({ setStatus }) => {
+      const bedDefaultFallback = ({ setStatus }: c.Context) => {
         setStatus(404);
         return "Not found.";
       };
+      output[FALLBACK] = bedDefaultFallback;
     }
+
     // typescript made me do it this way
     if (ERROR in config) output[ERROR] = config[ERROR];
     if (GET in config) output[GET] = config[GET];
@@ -135,18 +131,10 @@ class Server<UserDefinedContext extends c.Context> {
 
     return output;
   }
-
-  async #preprocess(event: Deno.RequestEvent) {
-    for (const prehandler of this.prehandlers) {
-      const done = await prehandler(event, this);
-      if (done) return true;
-    }
-    return false;
-  }
 }
 
 export { ALIAS, DELETE, ERROR, FALLBACK, GET, PARAM, POST, PUT, Server, USE };
-export type { Config, Handler, Prehandler, Sendable };
+export type { Config, Handler, Sendable };
 export { Context } from "./lib/context.ts";
 export type { WithBody, WithQuery } from "./lib/types.ts";
 export { PublicError } from "./error.ts";

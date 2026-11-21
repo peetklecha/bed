@@ -24,28 +24,18 @@ const srvr = new Server({
 
 {
   const ctx = new Context({
-    request: {
-      url: "http://tld/one/two/hello/three?query=thing&five=six",
-      method: "GET",
-    },
-    respondWith() {
-      console.log("response");
-    },
-  });
+    url: "http://tld/one/two/hello/three?query=thing&five=six",
+    method: "GET",
+  } as Request);
 
   await ctx.init(srvr).next();
 }
 
 {
   const ctx = new Context({
-    request: {
-      url: "http://tld/one/to/hello/three?query=thing&five=six",
-      method: "GET",
-    },
-    respondWith() {
-      console.log("response");
-    },
-  });
+    url: "http://tld/one/to/hello/three?query=thing&five=six",
+    method: "GET",
+  } as Request);
 
   await ctx.init(srvr).next();
 }
