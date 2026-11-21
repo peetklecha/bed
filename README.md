@@ -48,10 +48,27 @@ const server = new Server(api);
 export default { fetch: (req) => server.fetch(req) } satisfies ExportedHandler;
 ```
 
+For extended context types, parametric routes, middleware, fallback handlers, error handling, body parsing, and customization see the following subsections.
+
+### Extend Context Types
+
+Middleware my attach additional properties to the context object. Declare the extended type of the context object when you instantiate the server like so:
+
 ```ts
-// Deno / Bun
-Deno.serve({ port: 8080 }, new Server(api).fetch);
-Bun.serve({ port: 8080, fetch: new Server(api).fetch });
+import { Server, Context, USE } from 'bed/core.ts';
+
+interface MyContext extends Context {
+	myValue: string
+}
+
+function attachMyValue(ctx: MyContext) {
+	ctx.myValue = "hello!";
+	ctx.next();
+}
+
+await new Server<MyContext>({
+	[USE]: [logging, attachMyValue]
+}).listen(8080);
 ```
 
 ## Routes
@@ -234,24 +251,90 @@ Request bodies are parsed as JSON eagerly. Parse errors are deferred until
 new Server(api, { jsonBody: false });
 ```
 
-## Logging
+## Supplementary Modules
+
+The library exposes several supplementary modules which can be imported as needed. These have yet to be documented but all expose fairly simple APIs.
+
+### Cookies
 
 ```ts
-import logging from "@peetklecha/bed/logging";
+// server.ts
+import { CookiesContext, cookies } from 'bed/cookie.ts';
+import type { Context } from 'bed/core.ts';
 
-new Server({ [USE]: [logging], ... }); // logs "GET /users 200 1.23ms"
+export type Ctx = Context & CookiesContext;
+
+await new Server<Ctx>({
+  [USE]: [cookies],
+  auth: {
+    login,
+    me
+  }
+}).listen(8080)
+
+// login.ts
+
+export async function login(ctx: Ctx) {
+  // ...
+  ctx.addCookie({
+    name: "mySession",
+    value: "jk32jfk49134",
+    expires,
+  })
+  // ...
+}
+
+// me.ts
+
+export async function me(ctx: Ctx) {
+  const { cookies: { mySession } } = ctx;
+  // ...
+}
+
 ```
 
-Set the `BED_LOG_HANDLERS` environment variable to log each handler as it runs.
-
-## Client
-
-`@peetklecha/bed/client` builds a typed client from your API's type:
+Here is the CookiesContext exported by `cookie.ts`:
 
 ```ts
-import { api } from "@peetklecha/bed/client";
-import type { API } from "../server/api.ts"; // export type API = typeof config
+import type { Cookie } from 'https://deno.land/std@0.125.0/http/cookie.ts'
 
-const client = api<API>({ baseUrl: "/" });
-const { err, res } = await client.get.users[userId]();
+export interface CookiesContext {
+	cookies: Record<string, string>
+	addCookie: (cookie: Cookie) => void;
+	outgoingCookies: Cookie[]
+ }
 ```
+
+### Static
+
+Just a thin wrapper around https://deno.land/x/static_files@1.1.6/mod.ts.
+
+```ts
+import { serveStatic } from 'bed/static.ts';
+
+await new Server({
+  [USE]: [serveStatic("..", "public")],
+  auth: {
+    login,
+    me
+  }
+}).listen(8080)
+```
+
+
+### Logger
+
+```ts
+import { logging } from 'bed/logger.ts';
+
+await new Server({
+  [USE]: [logging],
+  auth: {
+    login,
+    me
+  }
+}).listen(8080)
+```
+
+### Validator
+
