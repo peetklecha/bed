@@ -4,7 +4,7 @@ import {
   ERROR,
   FALLBACK,
   GET,
-  MethodSymbol,
+  type MethodSymbol,
   PARAM,
   PARENT,
   POST,
@@ -12,13 +12,15 @@ import {
   USE,
 } from "./lib/symbols.ts";
 import {
-  AnnotatedConfig,
-  AnnotatedParamConfig,
-  Config,
-  Handler,
+  type AnnotatedConfig,
+  type AnnotatedParamConfig,
+  type Config,
+  type ErrorHandler,
+  type Handler,
+  type HandlerStep,
   hasParam,
   isParamConfig,
-  Sendable,
+  type Sendable,
 } from "./lib/types.ts";
 import * as c from "./lib/context.ts";
 
@@ -41,43 +43,45 @@ class Server<UserDefinedContext extends c.Context> {
     this.config = Server.#annotateConfig(apiConfig);
   }
 
-  fetch = async (req: Request) => {
-    console.log(req);
-    return await new Context(req).init(this)
-      .next();
+  /** Handle a web-standard Request. Works anywhere `fetch` handlers do. */
+  fetch = (req: Request): Promise<Response> => {
+    return new Context(req).init(this).next();
   };
 
+  /**
+   * Yields every handler that applies to a request -- middleware first, then
+   * the endpoint (or the nearest fallback) -- each paired with the nearest
+   * error handler in scope at that point in the tree.
+   */
   *traverseEndpoint(
     method: MethodSymbol,
     params: Record<string, string>,
     ...path: string[]
-  ) {
+  ): Generator<HandlerStep<UserDefinedContext>, void, unknown> {
     let endpoint = this.config;
-    yield* endpoint[USE] ?? [];
+    let err: ErrorHandler | undefined;
+    let fallback = endpoint[FALLBACK]!;
+    function* enter(node: AnnotatedConfig<UserDefinedContext>) {
+      if (node[ERROR]) err = node[ERROR];
+      if (node[FALLBACK]) fallback = node[FALLBACK];
+      for (const handler of node[USE] ?? []) yield { handler, err };
+    }
+    yield* enter(endpoint);
     let miss = false;
     for (const node of path) {
-      if (node in endpoint) {
+      if (Object.hasOwn(endpoint, node)) {
         endpoint = endpoint[node];
-        yield* endpoint[USE] ?? [];
       } else if (hasParam(endpoint)) {
-        const paramEndpoint = endpoint[PARAM];
-        params[paramEndpoint[ALIAS]] = node;
-        endpoint = paramEndpoint;
-        yield* endpoint[USE] ?? [];
+        params[endpoint[PARAM][ALIAS]] = node;
+        endpoint = endpoint[PARAM];
       } else {
         miss = true;
+        break;
       }
+      yield* enter(endpoint);
     }
-    if (!miss && endpoint[method]) {
-      yield endpoint[method];
-    } else {
-      let fallback = endpoint[FALLBACK];
-      while (!fallback) {
-        endpoint = endpoint[PARENT]!;
-        fallback = endpoint[FALLBACK];
-      }
-      yield fallback;
-    }
+    const handler = miss ? undefined : endpoint[method];
+    yield { handler: handler ?? fallback, err };
   }
 
   static #annotateConfig<UserDefinedContext extends c.Context>(
@@ -134,8 +138,10 @@ class Server<UserDefinedContext extends c.Context> {
 }
 
 export { ALIAS, DELETE, ERROR, FALLBACK, GET, PARAM, POST, PUT, Server, USE };
-export type { Config, Handler, Sendable };
+export type { Config, ErrorHandler, Handler, Sendable };
 export { Context } from "./lib/context.ts";
+export type { ErrorContext } from "./lib/context.ts";
+export type { Cookie } from "./lib/cookie.ts";
 export type { WithBody, WithQuery } from "./lib/types.ts";
 export { PublicError } from "./error.ts";
 

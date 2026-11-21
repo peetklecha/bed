@@ -5,7 +5,7 @@ import {
   FALLBACK,
   GET,
   METHOD_SYMBOLS,
-  MethodSymbol,
+  type MethodSymbol,
   PARAM,
   PARENT,
   POST,
@@ -78,12 +78,13 @@ export type Handler<
     ctx: UserDefinedContext,
   ) => HandlerReturnValue;
 
-type ErrorHandler = (errCtx: ErrorContext) => HandlerReturnValue;
+export type ErrorHandler = (errCtx: ErrorContext) => HandlerReturnValue;
 
-// export type Prehandler<Ctx extends Context> = (
-//   event: Deno.RequestEvent,
-//   server: Server<Ctx>,
-// ) => Promise<boolean>;
+/** A handler to run, paired with the nearest error handler in scope. */
+export type HandlerStep<UserDefinedContext extends Context> = {
+  handler: Handler<UserDefinedContext>;
+  err?: ErrorHandler;
+};
 
 export type Sendable =
   | BodyInit

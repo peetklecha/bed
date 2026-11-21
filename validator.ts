@@ -69,7 +69,7 @@ function applyValidationFunc<T, U extends Validation>(
   }
 }
 
-validate.onFail = function onFail(badValues: Record<string, unknown>) {
+validate.onFail = function onFail(badValues: Record<string, unknown>): never {
   throw new PublicError(
     400,
     `Bad payload \n\t${
@@ -128,7 +128,7 @@ export function schema<T extends Record<string, Validator>>(
 export const array = <T>(func: Guard<T>) => (obj: unknown): obj is T[] =>
   Array.isArray(obj) && obj.every(func);
 
-export function or<T, U>(func1: Guard<T>, func2: Guard<U>) {
+export function or<T, U>(func1: Guard<T>, func2: Guard<U>): Guard<T | U> {
   return (obj: unknown): obj is T | U => func1(obj) || func2(obj);
 }
 
