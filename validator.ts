@@ -1,5 +1,5 @@
 import type { Recievable } from "./lib/types.ts";
-import { PublicError } from "./lib/util.ts";
+import { PublicError } from "./error.ts";
 
 export const OPTIONAL = Symbol("optional value");
 export const REQUIRED = Symbol("required value");
@@ -17,8 +17,8 @@ type Validation = Record<string, Validator>;
 type Validatum<T extends Validation> =
   & {
     [Prop in keyof T]: T[Prop] extends Guard<infer U> ? U
-      : // deno-lint-ignore ban-types
-      T[Prop] extends Function ? never
+      // deno-lint-ignore ban-types
+      : T[Prop] extends Function ? never
       : T[Prop] extends typeof OPTIONAL ? unknown | undefined
       : T[Prop] extends typeof REQUIRED ? unknown
       : T[Prop];
@@ -69,7 +69,7 @@ function applyValidationFunc<T, U extends Validation>(
   }
 }
 
-validate.onFail = function onFail(badValues: Record<string, unknown>) {
+validate.onFail = function onFail(badValues: Record<string, unknown>): never {
   throw new PublicError(
     400,
     `Bad payload \n\t${
@@ -91,8 +91,8 @@ export const object = (obj: unknown): obj is Record<string, unknown> =>
   typeof obj === "object" &&
   obj !== null;
 
-export const record = <T>(func: Guard<T>) =>
-  (obj: unknown): obj is Record<string, T> =>
+export const record =
+  <T>(func: Guard<T>) => (obj: unknown): obj is Record<string, T> =>
     object(obj) &&
     Object.values(obj).every(func);
 
@@ -125,10 +125,10 @@ export function schema<T extends Record<string, Validator>>(
   };
 }
 
-export const array = <T>(func: Guard<T>) =>
-  (obj: unknown): obj is T[] => Array.isArray(obj) && obj.every(func);
+export const array = <T>(func: Guard<T>) => (obj: unknown): obj is T[] =>
+  Array.isArray(obj) && obj.every(func);
 
-export function or<T, U>(func1: Guard<T>, func2: Guard<U>) {
+export function or<T, U>(func1: Guard<T>, func2: Guard<U>): Guard<T | U> {
   return (obj: unknown): obj is T | U => func1(obj) || func2(obj);
 }
 

@@ -1,24 +1,29 @@
+import { type Cookie, getCookies, setCookie } from "./cookie.ts";
 import type { Server } from "../core.ts";
 import type {
-  AnnotatedConfig,
-  Handler,
-  Sendable,
+  ErrorHandler,
+  HandlerStep,
   SupportedMethodString,
 } from "./types.ts";
 
 import {
   DELETE,
-  ERROR,
   GET,
   MALFORMED_BODY,
-  MethodSymbol,
-  PARENT,
+  type MethodSymbol,
   POST,
   PUT,
 } from "./symbols.ts";
-import { PublicError } from "./util.ts";
+import { assignHeaders, isBodyInit } from "./util.ts";
+import { PublicError } from "../error.ts";
 
 const decoder = new TextDecoder();
+
+// Read lazily from process.env, which exists on Node, Deno, Bun, and on
+// Cloudflare Workers with `nodejs_compat`.
+const logHandlers = (): boolean =>
+  !!(globalThis as { process?: { env?: Record<string, string | undefined> } })
+    .process?.env?.BED_LOG_HANDLERS;
 
 export class Context {
   static symbols: Record<SupportedMethodString, MethodSymbol> = {
@@ -28,53 +33,84 @@ export class Context {
     DELETE,
   };
 
-  #handlersIterator: IterableIterator<Handler<Context>> = [][Symbol.iterator]();
-  #bodyPromise: Promise<ReturnType<JSON["parse"]>> = Promise.resolve();
-  #endpoint: AnnotatedConfig<Context> = { [PARENT]: null };
+  #handlersIterator: Iterator<HandlerStep<Context>> = [][Symbol.iterator]();
+  #bodyPromise?: Promise<undefined> = Promise.resolve(
+    {} as unknown as undefined,
+  );
 
-  query: Record<string, unknown> = {};
-  params: Record<string, string> = {};
-  err: Error | null = null;
-  extras: Record<string, unknown> = {};
+  #responseStatus = 200;
+  #responseHeaders = new Headers();
 
-	constructor(public requestEvent: Deno.RequestEvent) {}
-  init<UserDefinedContext extends Context>(server: Server<UserDefinedContext>) {
-    const { path, queryString } = this.processedUrl;
-    const { endpoint, params, handlers } = server.traverseEndpoint(
-      ...path,
-      this.#methodSymbol,
-    );
-
-    this.#handlersIterator = handlers[Symbol.iterator]() as IterableIterator<Handler<Context>>;
-    this.#bodyPromise = server.jsonBody ? this.#getBody() : Promise.resolve();
-    this.#endpoint = endpoint as AnnotatedConfig<Context>;
-
-    this.query = Object.fromEntries(new URLSearchParams(queryString));
-    this.params = params;
-		return this;
+  #cookies: Record<string, string> | null = null;
+  get cookies(): Record<string, string> {
+    if (!this.#cookies) {
+      this.#cookies = getCookies(this.request.headers);
+    }
+    return this.#cookies;
   }
 
-  getBody = async () => {
+  query: never = {} as never;
+  params: Record<string, string> = {};
+  err: Error | null = null;
+  request: Request;
+
+  constructor(request: Request) {
+    this.request = request;
+  }
+
+  init<UserDefinedContext extends Context>(
+    server: Server<UserDefinedContext>,
+  ): this {
+    const { path, queryString } = this.processedUrl;
+    this.#handlersIterator = server.traverseEndpoint(
+      this.#methodSymbol,
+      this.params,
+      ...path,
+    ) as Iterator<HandlerStep<Context>>;
+
+    this.#bodyPromise = server.jsonBody ? this.#getBody() : Promise.resolve();
+
+    // @ts-expect-error query is actually Record<string, unknown> but needs `never` for obscure reasons
+    this.query = Object.fromEntries(
+      new URLSearchParams(queryString),
+    );
+    return this;
+  }
+
+  getBody: never = (async () => {
     const body = (await this.#bodyPromise) || {};
-    if (MALFORMED_BODY in body) {
+    if (typeof body === "object" && body && MALFORMED_BODY in body) {
       throw new Error("There was an error parsing the request body as JSON.");
     }
     return body;
-  };
+  }) as never;
 
-  next = async (err?: Error) => {
+  #currentErrorHandler?: ErrorHandler;
+
+  next = async (passedError?: Error): Promise<Response> => {
+    if (passedError) {
+      return await this.#handleError(passedError, this.#currentErrorHandler);
+    }
+    const step = this.#handlersIterator.next();
+    const err = step.done ? this.#currentErrorHandler : step.value.err;
+    this.#currentErrorHandler = err;
     try {
-      if (err) throw err;
-      const { value: handler, done } = this.#handlersIterator.next();
-      if (!done) return await handler(this);
-      else throw new Error("Can't call next -- no more handlers!");
-    } catch (err) {
-      await this.#handleError(err);
+      if (step.done) throw new Error("Can't call next -- no more handlers!");
+      if (logHandlers()) console.log(" ->", step.value.handler);
+      return this.#res(await step.value.handler(this));
+    } catch (e) {
+      const error = e instanceof Error ? e : new Error(String(e));
+      return await this.#handleError(error, err);
     }
   };
 
-  get processedUrl() {
-    const { requestEvent: { request: { url } } } = this;
+  get processedUrl(): {
+    path: string[];
+    queryString: string;
+    pathString: string;
+    fullPathString: string;
+  } {
+    const { request: { url } } = this;
     const tld = url.slice(url.indexOf("://") + 3);
     const fullPathString = tld.slice(tld.indexOf("/"));
     const [pathString, queryString = ""] = fullPathString.split("?");
@@ -82,8 +118,12 @@ export class Context {
     return { path, queryString, pathString, fullPathString };
   }
 
+  get url(): URL {
+    return new URL(this.request.url);
+  }
+
   get #methodSymbol() {
-    const { requestEvent: { request } } = this;
+    const { request } = this;
     const method = request.method.toUpperCase();
     if (!Context.methodIsSupported(method)) {
       throw new Error(`Method ${request.method} is not supported.`);
@@ -91,33 +131,67 @@ export class Context {
     return Context.symbols[method];
   }
 
-  res = async (first?: number | Sendable, second?: Sendable, responseParams?: Partial<ResponseInit>) => {
-    const status = typeof first === "number"
-      ? first
-      : first === undefined
-      ? 204
-      : 200;
-    const body =
-      typeof first === "number" && second === undefined || first === undefined
-        ? null
-        : JSON.stringify(second === undefined ? first : second);
-		const headers = new Headers(responseParams?.headers);
-		headers.append("Content-Type", "application/json");
-		this.extras.responseStatus = status;
-		this.extras.responseBody = body;
-    await this.requestEvent.respondWith(new Response(body, { status, ...responseParams, headers }));
+  getHeaders = (): Headers => {
+    return this.#responseHeaders;
   };
 
-	redirect = (url: string, responseParams?: Partial<ResponseInit>) => {
-		const headers = new Headers(responseParams?.headers);
-		headers.set('location', url);
-		const response = new Response(null, { status: 302, ...responseParams, headers });
-		return this.requestEvent.respondWith(response);
-	}
+  setHeaders = (headers: HeadersInit): void => {
+    this.#responseHeaders = new Headers(headers);
+  };
+
+  assignHeaders = (...headers: HeadersInit[]): void => {
+    this.#responseHeaders = assignHeaders(this.#responseHeaders, ...headers);
+  };
+
+  getStatus = (): number => {
+    return this.#responseStatus;
+  };
+
+  setStatus = (status: number): void => {
+    this.#responseStatus = status;
+  };
+
+  setCookie = (cookie: Cookie): void => {
+    setCookie(this.#responseHeaders, cookie);
+  };
+
+  #bodyHooks: ((body: unknown) => unknown)[] = [];
+  setBodyHook = (cb: (body: unknown) => unknown): void => {
+    this.#bodyHooks.push(cb);
+  };
+
+  #res = (unserializedBody: unknown): Response => {
+    if (unserializedBody instanceof Response) return unserializedBody;
+    const status = this.#responseStatus;
+    const headers = this.#responseHeaders;
+
+    for (const cb of this.#bodyHooks) {
+      unserializedBody = cb(unserializedBody);
+    }
+
+    let body: BodyInit | null;
+    if (unserializedBody === null || unserializedBody === undefined) {
+      body = null;
+    } else if (isBodyInit(unserializedBody)) {
+      body = unserializedBody;
+    } else {
+      body = JSON.stringify(unserializedBody);
+      if (!headers.get("Content-Type")) {
+        headers.append("Content-Type", "application/json");
+      }
+    }
+    return new Response(body, { status, headers });
+  };
+
+  redirect = (url: string): string => {
+    this.assignHeaders({ location: url });
+    this.setStatus(302);
+    return "";
+  };
 
   async #getBody() {
     try {
-      const buffer = await this.requestEvent.request.arrayBuffer();
+      const buffer = await this.request.arrayBuffer();
       const array = new Uint8Array(buffer);
       const string = decoder.decode(array);
       return JSON.parse(string);
@@ -126,21 +200,22 @@ export class Context {
     }
   }
 
-  async #handleError(err: Error): Promise<void> {
+  async #handleError(err: Error, handler?: ErrorHandler): Promise<Response> {
     if (err instanceof PublicError) {
-      return await this.res(err.statusCode, err.message);
+      this.#responseStatus = err.statusCode;
+      return this.#res(err.message);
     }
     try {
       // use nearest user-defined error handler, if one exists
       this.err = err;
-      let endpoint: AnnotatedConfig<this> | null = this.#endpoint;
-      while (endpoint && !(ERROR in endpoint)) {
-				endpoint = endpoint[PARENT];
-			}
-      if (endpoint && ERROR in endpoint) {
-        return await endpoint[ERROR]!(this as ErrorContext);
+      if (handler) {
+        return this.#res(await handler(this as ErrorContext));
       }
     } catch (err) {
+      if (err instanceof PublicError) {
+        this.#responseStatus = err.statusCode;
+        return this.#res(err.message);
+      }
       // log any errors that occur within user-defined error handlers
       console.error(
         "Bed Error: An error occurred inside a user-defined error-handler.",
@@ -148,7 +223,8 @@ export class Context {
       console.error(err);
     }
     // otherwise just send 500
-    await this.res(500).catch(console.error);
+    this.#responseStatus = 500;
+    return this.#res("error");
   }
 
   static methodIsSupported(

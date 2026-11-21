@@ -1,0 +1,15 @@
+{
+  "name": "@peetklecha/bed",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test *.test.ts",
+    "publish:dry": "npx jsr publish --dry-run",
+    "publish:jsr": "npx jsr publish"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "typescript": "^7.0.2"
+  }
+}

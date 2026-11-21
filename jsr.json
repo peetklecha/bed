@@ -1,0 +1,17 @@
+{
+  "name": "@peetklecha/bed",
+  "version": "0.1.0",
+  "license": "MIT",
+  "exports": {
+    ".": "./core.ts",
+    "./logging": "./logger.ts",
+    "./client": "./client.ts",
+    "./error": "./error.ts",
+    "./validator": "./validator.ts",
+    "./node": "./node.ts"
+  },
+  "publish": {
+    "include": ["README.md", "LICENSE", "*.ts", "lib/**/*.ts"],
+    "exclude": ["test.ts", "*.test.ts"]
+  }
+}

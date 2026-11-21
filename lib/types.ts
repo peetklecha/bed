@@ -5,7 +5,7 @@ import {
   FALLBACK,
   GET,
   METHOD_SYMBOLS,
-  MethodSymbol,
+  type MethodSymbol,
   PARAM,
   PARENT,
   POST,
@@ -13,61 +13,91 @@ import {
   USE,
 } from "./symbols.ts";
 import type { Context, ErrorContext } from "./context.ts";
+// import type { Server } from "../core.ts";
 
-export interface Config<UserDefinedContext extends Context> {
+export interface Config<
+  UserDefinedContext extends Context,
+> {
   [key: string]: Config<UserDefinedContext>;
   [PARAM]?: ParamConfig<UserDefinedContext>;
   [USE]?: Handler<UserDefinedContext>[];
-  [GET]?: HandlerSpec<UserDefinedContext>;
-  [PUT]?: HandlerSpec<UserDefinedContext>;
-  [POST]?: HandlerSpec<UserDefinedContext>;
-  [DELETE]?: HandlerSpec<UserDefinedContext>;
-  [FALLBACK]?: HandlerSpec<UserDefinedContext>;
+  [GET]?: Handler<UserDefinedContext>;
+  [PUT]?: Handler<UserDefinedContext>;
+  [POST]?: Handler<UserDefinedContext>;
+  [DELETE]?: Handler<UserDefinedContext>;
+  [FALLBACK]?: Handler<UserDefinedContext>;
   [ERROR]?: ErrorHandler;
 }
 
-export interface AnnotatedConfig<UserDefinedContext extends Context> extends Config<UserDefinedContext> {
+export interface AnnotatedConfig<UserDefinedContext extends Context>
+  extends Config<UserDefinedContext> {
   [key: string]: AnnotatedConfig<UserDefinedContext>;
   [PARENT]: AnnotatedConfig<UserDefinedContext> | null;
   [ALIAS]?: string;
 }
 
-export interface ConfigWithParam<UserDefinedContext extends Context> extends Config<UserDefinedContext> {
+export interface ConfigWithParam<UserDefinedContext extends Context>
+  extends Config<UserDefinedContext> {
   [PARAM]: ParamConfig<UserDefinedContext>;
 }
 
-export interface AnnotatedConfigWithParam<UserDefinedContext extends Context> extends AnnotatedConfig<UserDefinedContext> {
+export interface AnnotatedConfigWithParam<UserDefinedContext extends Context>
+  extends AnnotatedConfig<UserDefinedContext> {
   [PARAM]: AnnotatedParamConfig<UserDefinedContext>;
 }
 
-export interface AnnotatedParamConfig<UserDefinedContext extends Context> extends AnnotatedConfig<UserDefinedContext> {
+export type _AnnotatedParamConfig<UDC extends Context, T extends string> = {
+  [ALIAS]: T;
+} & AnnotatedConfig<UDC & { params: { [Key in T]: string } }>;
+
+export interface AnnotatedParamConfig<UserDefinedContext extends Context>
+  extends AnnotatedConfig<UserDefinedContext> {
   [ALIAS]: string;
 }
 
-export interface ParamConfig<UserDefinedContext extends Context> extends Config<UserDefinedContext> {
+export interface ParamConfig<UserDefinedContext extends Context>
+  extends Config<UserDefinedContext> {
   [ALIAS]: string;
 }
 
-export interface ConfigWithFallback<UserDefinedContext extends Context> extends AnnotatedConfig<UserDefinedContext> {
-  [FALLBACK]: HandlerSpec<UserDefinedContext>;
+export interface ConfigWithFallback<UserDefinedContext extends Context>
+  extends AnnotatedConfig<UserDefinedContext> {
+  [FALLBACK]: Handler<UserDefinedContext>;
 }
 
-export type Handler<UserDefinedContext extends Context> = (ctx: UserDefinedContext) => void | Promise<void>;
-type ErrorHandler = (errCtx: ErrorContext) => void | Promise<void>;
-export type HandlerSpec<UserDefinedContext extends Context> = Handler<UserDefinedContext> | Handler<UserDefinedContext>[];
+export type HandlerReturnValue =
+  | Promise<void | Sendable>
+  | Sendable
+  | void;
 
-export type Prehandler = ((
-  event: Deno.RequestEvent,
-) => Promise<boolean>);
+export type Handler<
+  UserDefinedContext extends Context, //<Query, Body>,
+> // Query extends {} = Record<string, unknown>,
+ = // Body extends {} = Record<string, unknown>,
+  (
+    ctx: UserDefinedContext,
+  ) => HandlerReturnValue;
 
-export type Sendable = string | boolean | null | (Sendable | number)[] | {
-  [key: string]: (Sendable | number);
+export type ErrorHandler = (errCtx: ErrorContext) => HandlerReturnValue;
+
+/** A handler to run, paired with the nearest error handler in scope. */
+export type HandlerStep<UserDefinedContext extends Context> = {
+  handler: Handler<UserDefinedContext>;
+  err?: ErrorHandler;
 };
+
+export type Sendable =
+  | BodyInit
+  | null
+  | unknown[]
+  | (object & {});
 export type Recievable = string | boolean | null | number | Recievable[] | {
   [key: string]: Recievable;
 };
 
-export function isParamConfig<UserDefinedContext extends Context>(config: Config<UserDefinedContext>): config is ParamConfig<UserDefinedContext> {
+export function isParamConfig<UserDefinedContext extends Context>(
+  config: Config<UserDefinedContext>,
+): config is ParamConfig<UserDefinedContext> {
   return ALIAS in config;
 }
 
@@ -90,3 +120,21 @@ export function hasFallback<UserDefinedContext extends Context>(
 }
 
 export type SupportedMethodString = "GET" | "PUT" | "POST" | "DELETE";
+
+export function asAPI<
+  UserDefinedContext extends Context,
+>(cfg: Config<UserDefinedContext>): typeof cfg {
+  return cfg;
+}
+
+export type WithQuery<UserContext extends Context, Query extends {}> =
+  & Omit<UserContext, "query">
+  & {
+    query: Query;
+  };
+
+export type WithBody<UserContext extends Context, Body extends {}> =
+  & Omit<UserContext, "getBody">
+  & {
+    getBody: () => Promise<Body>;
+  };
