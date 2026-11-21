@@ -25,7 +25,12 @@ const logHandlers = (): boolean =>
   !!(globalThis as { process?: { env?: Record<string, string | undefined> } })
     .process?.env?.BED_LOG_HANDLERS;
 
+/**
+ * The per-request object passed to every handler. Extend it with your own
+ * properties (set by middleware) and pass the extended type to `Server`.
+ */
 export class Context {
+  /** Maps HTTP method names to their route symbols. */
   static symbols: Record<SupportedMethodString, MethodSymbol> = {
     GET,
     PUT,
@@ -42,6 +47,7 @@ export class Context {
   #responseHeaders = new Headers();
 
   #cookies: Record<string, string> | null = null;
+  /** The request's cookies, as a record of names to values. */
   get cookies(): Record<string, string> {
     if (!this.#cookies) {
       this.#cookies = getCookies(this.request.headers);
@@ -49,15 +55,21 @@ export class Context {
     return this.#cookies;
   }
 
+  /** The parsed query string. Declare its shape with `WithQuery`. */
   query: never = {} as never;
+  /** Values of the parametric path segments, keyed by their `[ALIAS]`. */
   params: Record<string, string> = {};
+  /** In an `[ERROR]` handler, the error being handled. */
   err: Error | null = null;
+  /** The underlying request. */
   request: Request;
 
+  /** Create a context for `request`. Call `init` before use. */
   constructor(request: Request) {
     this.request = request;
   }
 
+  /** Internal: route the request through `server` and start parsing the body. */
   init<UserDefinedContext extends Context>(
     server: Server<UserDefinedContext>,
   ): this {
@@ -77,6 +89,10 @@ export class Context {
     return this;
   }
 
+  /**
+   * The parsed JSON request body. Throws if the body isn't valid JSON.
+   * Declare its shape with `WithBody`.
+   */
   getBody: never = (async () => {
     const body = (await this.#bodyPromise) || {};
     if (typeof body === "object" && body && MALFORMED_BODY in body) {
@@ -87,6 +103,11 @@ export class Context {
 
   #currentErrorHandler?: ErrorHandler;
 
+  /**
+   * Run the next handler and resolve to its response. Middleware returns this
+   * (possibly modified). Passing an error sends it to the nearest `[ERROR]`
+   * handler instead.
+   */
   next = async (passedError?: Error): Promise<Response> => {
     if (passedError) {
       return await this.#handleError(passedError, this.#currentErrorHandler);
@@ -104,6 +125,10 @@ export class Context {
     }
   };
 
+  /**
+   * The request URL split up: `path` is the path's segments (`/a/b` gives
+   * `["a", "b"]`), and `fullPathString` is the path plus the query string.
+   */
   get processedUrl(): {
     path: string[];
     queryString: string;
@@ -118,6 +143,7 @@ export class Context {
     return { path, queryString, pathString, fullPathString };
   }
 
+  /** The request URL, parsed. */
   get url(): URL {
     return new URL(this.request.url);
   }
@@ -131,31 +157,38 @@ export class Context {
     return Context.symbols[method];
   }
 
+  /** The response headers so far. */
   getHeaders = (): Headers => {
     return this.#responseHeaders;
   };
 
+  /** Replace the response headers. */
   setHeaders = (headers: HeadersInit): void => {
     this.#responseHeaders = new Headers(headers);
   };
 
+  /** Append to the response headers. */
   assignHeaders = (...headers: HeadersInit[]): void => {
     this.#responseHeaders = assignHeaders(this.#responseHeaders, ...headers);
   };
 
+  /** The response status so far (default 200). */
   getStatus = (): number => {
     return this.#responseStatus;
   };
 
+  /** Set the response status. */
   setStatus = (status: number): void => {
     this.#responseStatus = status;
   };
 
+  /** Add a `Set-Cookie` header to the response. */
   setCookie = (cookie: Cookie): void => {
     setCookie(this.#responseHeaders, cookie);
   };
 
   #bodyHooks: ((body: unknown) => unknown)[] = [];
+  /** Register a function to transform the returned body before it's sent. */
   setBodyHook = (cb: (body: unknown) => unknown): void => {
     this.#bodyHooks.push(cb);
   };
@@ -183,6 +216,7 @@ export class Context {
     return new Response(body, { status, headers });
   };
 
+  /** Redirect (302) to `url`. Use as `return ctx.redirect("/")`. */
   redirect = (url: string): string => {
     this.assignHeaders({ location: url });
     this.setStatus(302);
@@ -227,6 +261,7 @@ export class Context {
     return this.#res("error");
   }
 
+  /** Whether bed supports the HTTP method `method`. */
   static methodIsSupported(
     method: string,
   ): method is "GET" | "PUT" | "POST" | "DELETE" {
@@ -234,6 +269,8 @@ export class Context {
   }
 }
 
+/** The context passed to an `[ERROR]` handler. */
 export interface ErrorContext extends Context {
+  /** The error being handled. */
   err: Error;
 }

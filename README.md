@@ -15,7 +15,7 @@ To import it as plain `bed` (e.g. `import { Server } from "bed"`), alias it in
 `package.json` instead (and add `@jsr:registry=https://npm.jsr.io` to `.npmrc`):
 
 ```json
-{ "dependencies": { "bed": "npm:@jsr/peetklecha__bed@^0.1.0" } }
+{ "dependencies": { "bed": "npm:@jsr/peetklecha__bed@^0.1.1" } }
 ```
 
 Entry points:

@@ -1,3 +1,30 @@
+/**
+ * Bed: write a REST API as a tree of handlers, and serve it anywhere that
+ * takes a web-standard `fetch` handler (Node via `@peetklecha/bed/node`,
+ * Cloudflare Workers, Deno, Bun).
+ *
+ * @example
+ * ```ts
+ * import { ALIAS, type Config, Context, GET, PARAM, Server, USE } from "@peetklecha/bed";
+ * import logging from "@peetklecha/bed/logging";
+ *
+ * const api = {
+ *   [USE]: [logging],
+ *   users: {
+ *     [GET]: () => db.users.list(),
+ *     [PARAM]: {
+ *       [ALIAS]: "id",
+ *       [GET]: ({ params }) => db.users.get(params.id),
+ *     },
+ *   },
+ * } satisfies Config<Context>;
+ *
+ * const server = new Server(api);
+ * export default { fetch: server.fetch };
+ * ```
+ *
+ * @module
+ */
 import {
   ALIAS,
   DELETE,
@@ -26,11 +53,27 @@ import * as c from "./lib/context.ts";
 
 const { Context } = c;
 
+/**
+ * A bed server, built from a route tree. Serve it by passing `server.fetch`
+ * to your runtime, or with `listen` from `@peetklecha/bed/node`.
+ *
+ * Pass your extended context type as the type parameter if middleware adds
+ * properties to the context.
+ */
 class Server<UserDefinedContext extends c.Context> {
+  /** The route tree, annotated with parent links. */
   config: AnnotatedConfig<UserDefinedContext>;
+  /** Whether request bodies are parsed as JSON. */
   jsonBody: boolean;
+  /** Servers accept arbitrary extra properties. */
   [key: string]: unknown;
 
+  /**
+   * Create a server for the route tree `apiConfig`.
+   *
+   * @param apiConfig The route tree.
+   * @param options.jsonBody Parse request bodies as JSON (default `true`).
+   */
   constructor(
     apiConfig: Config<UserDefinedContext>,
     {
@@ -137,14 +180,40 @@ class Server<UserDefinedContext extends c.Context> {
   }
 }
 
-export { ALIAS, DELETE, ERROR, FALLBACK, GET, PARAM, POST, PUT, Server, USE };
-export type { Config, ErrorHandler, Handler, Sendable };
+export {
+  ALIAS,
+  DELETE,
+  ERROR,
+  FALLBACK,
+  GET,
+  PARAM,
+  PARENT,
+  POST,
+  PUT,
+  Server,
+  USE,
+};
+export type {
+  AnnotatedConfig,
+  Config,
+  ErrorHandler,
+  Handler,
+  HandlerStep,
+  MethodSymbol,
+  Sendable,
+};
 export { Context } from "./lib/context.ts";
 export type { ErrorContext } from "./lib/context.ts";
 export type { Cookie } from "./lib/cookie.ts";
-export type { WithBody, WithQuery } from "./lib/types.ts";
+export type {
+  HandlerReturnValue,
+  ParamConfig,
+  WithBody,
+  WithQuery,
+} from "./lib/types.ts";
 export { PublicError } from "./error.ts";
 
+/** Internal: the first `$`-prefixed key of a route, if any. */
 export function hasStringParam<UserDefinedContext extends c.Context>(
   endpoint: AnnotatedConfig<UserDefinedContext>,
 ): string | undefined {

@@ -1,7 +1,20 @@
-import type { Handler } from "./lib/types.ts";
+/**
+ * Request-logging middleware.
+ *
+ * @example
+ * ```ts
+ * import { Server, USE } from "@peetklecha/bed";
+ * import logging from "@peetklecha/bed/logging";
+ *
+ * new Server({ [USE]: [logging], ...routes }); // logs "GET /users 200 1.23ms"
+ * ```
+ *
+ * @module
+ */
 import type { Context } from "./lib/context.ts";
 
-const logging: Handler<Context> = async (ctx) => {
+/** Middleware that logs each request's method, path, status, and duration. */
+const logging = async (ctx: Context): Promise<Response> => {
   const { next, processedUrl, request } = ctx;
   const start = performance.now();
   const res = await next();
