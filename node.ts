@@ -39,7 +39,9 @@ export function toRequest(req: IncomingMessage): Request {
   return new Request(url, {
     method: req.method,
     headers,
-    body: hasBody ? (Readable.toWeb(req) as ReadableStream) : undefined,
+    body: hasBody
+      ? (Readable.toWeb(req) as unknown as ReadableStream)
+      : undefined,
     // required by Node's fetch implementation when body is a stream
     duplex: hasBody ? "half" : undefined,
   } as RequestInit);
@@ -61,7 +63,9 @@ export async function writeResponse(
     res.end();
     return;
   }
-  const body = Readable.fromWeb(response.body as NodeReadableStream);
+  const body = Readable.fromWeb(
+    response.body as unknown as NodeReadableStream,
+  );
   await new Promise<void>((resolve, reject) => {
     body.on("error", reject);
     res.on("finish", resolve);
