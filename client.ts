@@ -1,3 +1,19 @@
+/**
+ * A typed browser client for a bed API. Paths and arguments are checked
+ * against the server's route tree type.
+ *
+ * @example
+ * ```ts
+ * import { api } from "@peetklecha/bed/client";
+ * import type { API } from "../server/api.ts"; // export type API = typeof config
+ *
+ * const client = api<API>({});
+ * const { err, res } = await client.get.users[userId]();
+ * if (err === null) console.log(res);
+ * ```
+ *
+ * @module
+ */
 import type { Sendable } from "./lib/types.ts";
 import {
   DELETE,
@@ -8,11 +24,19 @@ import {
   PUT,
 } from "./lib/symbols.ts";
 
-type ClientConfig = {
+export type { MethodSymbol };
+
+/** Options for `api`. */
+export type ClientConfig = {
+  /** URL that request paths are resolved against. Defaults to the page's origin. */
   baseUrl?: string;
 };
 
-type ApiResult<T = unknown> = {
+/**
+ * The result of a request: on success `err` is `null` and `res` is the parsed
+ * JSON body; on failure `err` is the status code and `res` the status text.
+ */
+export type ApiResult<T = unknown> = {
   err: number;
   res: string;
 } | {
@@ -52,15 +76,24 @@ function collector(
   }) as unknown;
 }
 
-export const api = <API extends ClientsideAPI>(config: ClientConfig) => ({
+/**
+ * Create a client for the API whose route tree type is `API`. Build a path by
+ * property access under a method (`client.get.users.admins`), then call it:
+ * `GET`/`DELETE` take the query, `POST`/`PUT` take the JSON body.
+ */
+export const api = <API extends ClientsideAPI>(
+  config: ClientConfig,
+): Client<API> => ({
   get: collector("GET", config),
   put: collector("PUT", config),
   post: collector("POST", config),
   delete: collector("DELETE", config),
 } as Client<API>);
 
+/** Any route handler, as seen by the client. */
 export type ClientsideHandler = (ctx: never) => Promise<Sendable> | Sendable;
 
+/** The shape of a route tree, as seen by the client. */
 export type ClientsideAPI = {
   [key: string]: ClientsideAPI;
   [PARAM]?: ClientsideAPI;
@@ -70,13 +103,19 @@ export type ClientsideAPI = {
   [DELETE]?: ClientsideHandler;
 };
 
+/** A client for `Config`, with a path builder for each method. */
 export type Client<Config extends ClientsideAPI> = {
+  /** Paths with `GET` handlers. */
   get: Midpoint<typeof GET, Config>;
+  /** Paths with `PUT` handlers. */
   put: Midpoint<typeof PUT, Config>;
+  /** Paths with `POST` handlers. */
   post: Midpoint<typeof POST, Config>;
+  /** Paths with `DELETE` handlers. */
   delete: Midpoint<typeof DELETE, Config>;
 };
 
+/** A point in a path: callable if the route has a `Method` handler. */
 export type Midpoint<
   Method extends MethodSymbol,
   Config extends ClientsideAPI,
@@ -84,6 +123,7 @@ export type Midpoint<
   ? Trigger<Method, Config> & NonTerminal<Method, Config>
   : NonTerminal<Method, Config>;
 
+/** The child routes reachable from a point in a path. */
 export type NonTerminal<
   Method extends MethodSymbol,
   Config extends ClientsideAPI,
@@ -95,44 +135,32 @@ export type NonTerminal<
   ]: Midpoint<Method, Config[Key]>;
 };
 
-// export type Route<
-//   Method extends MethodSymbol,
-//   Config extends ClientsideAPI,
-// > =
-//   & {
-//     [
-//       Key in keyof Config as Key extends typeof PARAM ? string | number
-//         : Key extends string ? Key
-//         : never
-//     ]: Route<Method, Config[Key]>;
-//   }
-//   & (Method extends keyof Config ? Trigger<Method, Config>
-//     : {});
-// & (HasParam<keyof Config> extends never ? {}
-//   : Record<
-//     string,
-//     Route<Method, Config[HasParam<keyof Config>]>
-//   >);
-
-type Result<
+/** The promised result of calling handler `Func` through the client. */
+export type Result<
+  // deno-lint-ignore no-explicit-any
   Func extends (...args: any[]) => any,
 > = Promise<ApiResult<Await<ReturnType<Func>>>>;
 
-type Effect<ParamType, ReturnType> = (arg: ParamType) => ReturnType;
+/** A function from `ParamType` to `ReturnType`. */
+export type Effect<ParamType, ReturnType> = (arg: ParamType) => ReturnType;
 
+/**
+ * The call signature for a route's `Method` handler, taking its query
+ * (`GET`/`DELETE`) or body (`POST`/`PUT`) type.
+ */
 export type Trigger<
   Method extends MethodSymbol,
   Config extends ClientsideAPI,
+  // deno-lint-ignore no-explicit-any
 > = Config[Method] extends (...args: any[]) => any
   ? Parameters<Config[Method]> extends [infer Ctx]
     ? Method extends typeof GET | typeof DELETE
       ? "query" extends keyof Ctx
         ? Ctx["query"] extends never ? () => Result<Config[Method]>
-        : "query" extends keyof Ctx
-          ? Effect<Ctx["query"], Result<Config[Method]>> //(query: Ctx["query"]) => Result<Config[Method]>
-        : never
+        : Effect<Ctx["query"], Result<Config[Method]>>
       : never
     : "getBody" extends keyof Ctx
+      // deno-lint-ignore no-explicit-any
       ? Ctx["getBody"] extends (...args: any) => any
         ? Ctx["getBody"] extends never ? () => Result<Config[Method]>
         : Effect<Await<ReturnType<Ctx["getBody"]>>, Result<Config[Method]>>
@@ -141,40 +169,5 @@ export type Trigger<
   : never
   : never;
 
-// type HasParam<Z extends {}> = keyof {
-//   [Key in Z as Key extends `$${string}` ? Key : never]: Key;
-// };
-
-type Await<T> = T extends Promise<infer U> ? U : T;
-
-// const x = {
-//   hello: {
-//     [GET]: (ctx: Context) => {
-//       return {};
-//     },
-//   },
-// };
-
-// type Method = typeof GET;
-// type Config = typeof x.hello;
-
-// type z = Trigger<typeof GET, typeof x.hello>;
-// type m = Midpoint<typeof GET, typeof x.hello>;
-// type m_ = typeof GET extends keyof typeof x.hello ? 1 : 0;
-// type m__1 = Trigger<Method, Config>;
-// type m__2 = NonTerminal<Method, Config>;
-// type m__1_ = Config[Method] extends (...args: any) => any ? 1 : 0;
-// type m__1__ = Parameters<Config[Method]> extends [infer Ctx] ? Ctx : never;
-// type m__1___ = never extends never ? () => Result<Config[Method]> : 0;
-// // type m__1____ = Effect<never, Result<Config[Method]>>;
-
-// type zz = Method extends typeof GET | typeof DELETE ? Ctxx : never;
-// type zzz = m__1__ extends { query: infer Query } ? Query : 0;
-
-// // type c = Effect<never, 1>;
-
-// type _Effect<X, Y> = (arg: X) => Y;
-
-// type Y<Z> = "a" extends keyof Z ? (arg: Z["a"]) => void : never;
-// type YYY<Z> = "a" extends keyof Z ? _Effect<Z["a"], void> : never;
-// type YY<Z> = "a" extends keyof Z ? Z["a"] : never;
+/** The resolved type of `T` if it's a promise, else `T`. */
+export type Await<T> = T extends Promise<infer U> ? U : T;
